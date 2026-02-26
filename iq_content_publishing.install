@@ -1,0 +1,33 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for iq_content_publishing.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Implements hook_uninstall().
+ */
+function iq_content_publishing_uninstall(): void {
+  // Delete all publishing_log content entities.
+  $entity_type_manager = \Drupal::entityTypeManager();
+
+  // Delete all publishing_platform config entities.
+  if ($entity_type_manager->hasDefinition('publishing_platform')) {
+    $storage = $entity_type_manager->getStorage('publishing_platform');
+    $ids = $storage->getQuery()->accessCheck(FALSE)->execute();
+    if (!empty($ids)) {
+      $entities = $storage->loadMultiple($ids);
+      $storage->delete($entities);
+    }
+  }
+
+  // Delete the module's settings config.
+  \Drupal::configFactory()->getEditable('iq_content_publishing.settings')->delete();
+
+  // Purge any remaining queue items.
+  \Drupal::queue('iq_content_publishing')->deleteQueue();
+
+}

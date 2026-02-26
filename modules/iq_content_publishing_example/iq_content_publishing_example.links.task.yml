@@ -1,0 +1,5 @@
+iq_content_publishing_example.mock_log:
+  title: 'Mock API Log'
+  route_name: iq_content_publishing_example.mock_log
+  base_route: entity.publishing_platform.collection
+  weight: 20

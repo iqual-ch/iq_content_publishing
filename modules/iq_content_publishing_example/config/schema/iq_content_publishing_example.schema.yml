@@ -1,0 +1,27 @@
+iq_content_publishing_example.credentials.mock_social:
+  type: mapping
+  label: 'Mock Social credentials'
+  mapping:
+    api_key:
+      type: string
+      label: 'API Key (mock)'
+    api_secret:
+      type: string
+      label: 'API Secret (mock)'
+
+iq_content_publishing_example.settings.mock_social:
+  type: mapping
+  label: 'Mock Social platform settings'
+  mapping:
+    simulate_failure:
+      type: boolean
+      label: 'Simulate API failure'
+    simulated_delay_ms:
+      type: integer
+      label: 'Simulated API delay in milliseconds'
+    simulated_external_id:
+      type: string
+      label: 'Simulated external post ID prefix'
+    simulated_platform_url:
+      type: string
+      label: 'Simulated platform URL'

@@ -1,0 +1,17 @@
+iq_content_publishing.platforms:
+  title: 'Platforms'
+  route_name: entity.publishing_platform.collection
+  base_route: entity.publishing_platform.collection
+
+iq_content_publishing.settings:
+  title: 'Settings'
+  route_name: iq_content_publishing.settings
+  base_route: entity.publishing_platform.collection
+
+iq_content_publishing.log:
+  title: 'Log'
+  route_name: iq_content_publishing.log
+  base_route: entity.publishing_platform.collection
+
+iq_content_publishing.node_log:
+  deriver: 'Drupal\iq_content_publishing\Plugin\Derivative\PublishingLogLocalTask'

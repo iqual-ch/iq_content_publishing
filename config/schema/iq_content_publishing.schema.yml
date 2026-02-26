@@ -1,0 +1,62 @@
+iq_content_publishing.settings:
+  type: config_object
+  label: 'Content Publishing settings'
+  mapping:
+    enabled:
+      type: boolean
+      label: 'Enable content publishing globally'
+
+iq_content_publishing.platform.*:
+  type: config_entity
+  label: 'Publishing Platform'
+  mapping:
+    id:
+      type: string
+      label: 'Machine name'
+    label:
+      type: label
+      label: 'Label'
+    uuid:
+      type: string
+      label: 'UUID'
+    status:
+      type: boolean
+      label: 'Enabled'
+    description:
+      type: string
+      label: 'Description'
+    plugin_id:
+      type: string
+      label: 'Platform plugin ID'
+    review_mode:
+      type: boolean
+      label: 'Require review before publishing'
+    processing_mode:
+      type: string
+      label: 'Processing mode (sync or async)'
+    content_types:
+      type: sequence
+      label: 'Enabled content types'
+      sequence:
+        type: string
+        label: 'Content type machine name'
+    ai_instructions:
+      type: text
+      label: 'AI prompt instructions'
+    ai_model:
+      type: string
+      label: 'AI model override'
+    ai_provider:
+      type: string
+      label: 'AI provider ID'
+    resubmit_behavior:
+      type: string
+      label: 'Re-submission behavior (allow, warn, or block)'
+    credentials:
+      type: mapping
+      label: 'Platform credentials'
+      mapping: {}
+    plugin_settings:
+      type: mapping
+      label: 'Platform-specific settings'
+      mapping: {}

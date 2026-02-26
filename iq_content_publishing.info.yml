@@ -1,0 +1,10 @@
+name: 'Content Publishing'
+type: module
+description: 'Provides a platform-agnostic framework for publishing Drupal content to external platforms (social networks, newsletters, etc.) using AI-powered content transformation.'
+package: 'Content Publishing'
+core_version_requirement: ^11
+configure: entity.publishing_platform.collection
+dependencies:
+  - drupal:node
+  - drupal:content_moderation
+  - ai:ai

@@ -1,0 +1,6 @@
+iq_content_publishing.admin:
+  title: 'Content Publishing'
+  route_name: entity.publishing_platform.collection
+  description: 'Manage external publishing platforms and settings.'
+  parent: system.admin_config_services
+  weight: 10

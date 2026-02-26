@@ -1,0 +1,5 @@
+entity.publishing_platform.add_form:
+  route_name: entity.publishing_platform.add_form
+  title: 'Add publishing platform'
+  appears_on:
+    - entity.publishing_platform.collection

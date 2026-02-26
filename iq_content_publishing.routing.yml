@@ -1,0 +1,89 @@
+# Platform config entity routes.
+entity.publishing_platform.collection:
+  path: '/admin/config/services/content-publishing'
+  defaults:
+    _entity_list: 'publishing_platform'
+    _title: 'Content Publishing Platforms'
+  requirements:
+    _permission: 'administer content publishing'
+
+entity.publishing_platform.add_form:
+  path: '/admin/config/services/content-publishing/add'
+  defaults:
+    _entity_form: 'publishing_platform.add'
+    _title: 'Add Publishing Platform'
+  requirements:
+    _permission: 'administer content publishing'
+
+entity.publishing_platform.edit_form:
+  path: '/admin/config/services/content-publishing/{publishing_platform}'
+  defaults:
+    _entity_form: 'publishing_platform.edit'
+    _title: 'Edit Publishing Platform'
+  requirements:
+    _permission: 'administer content publishing'
+
+entity.publishing_platform.delete_form:
+  path: '/admin/config/services/content-publishing/{publishing_platform}/delete'
+  defaults:
+    _entity_form: 'publishing_platform.delete'
+    _title: 'Delete Publishing Platform'
+  requirements:
+    _permission: 'administer content publishing'
+
+# Global settings.
+iq_content_publishing.settings:
+  path: '/admin/config/services/content-publishing/settings'
+  defaults:
+    _form: 'Drupal\iq_content_publishing\Form\SettingsForm'
+    _title: 'Content Publishing Settings'
+  requirements:
+    _permission: 'administer content publishing'
+
+# Step 1: Select platforms.
+iq_content_publishing.select_platforms:
+  path: '/admin/node/{node}/publish-externally'
+  defaults:
+    _form: 'Drupal\iq_content_publishing\Form\PublishingSelectionForm'
+    _title: 'Publish to External Platforms'
+  requirements:
+    _permission: 'publish to external platforms'
+  options:
+    parameters:
+      node:
+        type: entity:node
+
+# Step 2: Review AI-generated content.
+iq_content_publishing.review:
+  path: '/admin/node/{node}/publish-externally/review'
+  defaults:
+    _form: 'Drupal\iq_content_publishing\Form\PublishingReviewForm'
+    _title: 'Review Content for External Publishing'
+  requirements:
+    _permission: 'publish to external platforms'
+  options:
+    parameters:
+      node:
+        type: entity:node
+
+# Publishing log.
+iq_content_publishing.log:
+  path: '/admin/config/services/content-publishing/log'
+  defaults:
+    _controller: 'Drupal\iq_content_publishing\Controller\PublishingLogController::overview'
+    _title: 'Publishing Log'
+  requirements:
+    _permission: 'view publishing log'
+
+# Node-level publishing log tab.
+iq_content_publishing.node_log:
+  path: '/admin/node/{node}/publishing-log'
+  defaults:
+    _controller: 'Drupal\iq_content_publishing\Controller\PublishingLogController::nodeLog'
+    _title: 'Publishing Log'
+  requirements:
+    _permission: 'view publishing log'
+  options:
+    parameters:
+      node:
+        type: entity:node

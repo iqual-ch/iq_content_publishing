@@ -1,0 +1,8 @@
+publishing-modal:
+  js:
+    js/publishing-modal.js: {}
+  dependencies:
+    - core/drupal
+    - core/drupal.ajax
+    - core/drupal.dialog.ajax
+    - core/jquery

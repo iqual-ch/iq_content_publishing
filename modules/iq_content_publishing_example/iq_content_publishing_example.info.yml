@@ -1,0 +1,7 @@
+name: 'Content Publishing: Example (Mock)'
+type: module
+description: 'Provides a mock publishing platform for testing the Content Publishing workflow. Simulates API calls and logs requests for inspection.'
+package: 'Content Publishing'
+core_version_requirement: ^11
+dependencies:
+  - iq_content_publishing:iq_content_publishing

@@ -1,0 +1,12 @@
+administer content publishing:
+  title: 'Administer content publishing'
+  description: 'Manage publishing platform configurations, credentials, and global settings.'
+  restrict access: true
+
+publish to external platforms:
+  title: 'Publish to external platforms'
+  description: 'Select external platforms and trigger AI-powered content publishing when publishing nodes.'
+
+view publishing log:
+  title: 'View publishing log'
+  description: 'View the history of content published to external platforms.'

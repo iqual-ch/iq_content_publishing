@@ -1,0 +1,24 @@
+iq_content_publishing_example.mock_log:
+  path: '/admin/config/services/content-publishing/mock-api-log'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_example\Controller\MockApiLogController::overview'
+    _title: 'Mock API Request Log'
+  requirements:
+    _permission: 'administer content publishing'
+
+iq_content_publishing_example.mock_log.clear:
+  path: '/admin/config/services/content-publishing/mock-api-log/clear'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_example\Controller\MockApiLogController::clear'
+    _title: 'Clear Mock API Log'
+  requirements:
+    _permission: 'administer content publishing'
+
+iq_content_publishing_example.mock_log.detail:
+  path: '/admin/config/services/content-publishing/mock-api-log/{index}'
+  defaults:
+    _controller: '\Drupal\iq_content_publishing_example\Controller\MockApiLogController::detail'
+    _title: 'Mock API Request Detail'
+  requirements:
+    _permission: 'administer content publishing'
+    index: '\d+'

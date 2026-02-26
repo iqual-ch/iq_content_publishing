@@ -1,0 +1,326 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\iq_content_publishing\Service;
+
+use Drupal\ai\AiProviderPluginManager;
+use Drupal\ai\OperationType\Chat\ChatInput;
+use Drupal\ai\OperationType\Chat\ChatMessage;
+use Drupal\Core\Utility\Token;
+use Drupal\node\NodeInterface;
+use Psr\Log\LoggerInterface;
+
+/**
+ * Transforms node content into structured platform-specific output using AI.
+ *
+ * Builds prompts from platform AI instructions, output schema, and node
+ * content. The AI returns JSON matching the schema's ai_generated fields.
+ * Non-AI fields (images, links) are populated programmatically.
+ */
+final class AiContentTransformer {
+
+  /**
+   * The logger.
+   */
+  protected LoggerInterface $logger;
+
+  /**
+   * Constructs an AiContentTransformer.
+   */
+  public function __construct(
+    protected AiProviderPluginManager $aiProvider,
+    protected Token $token,
+    \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerFactory,
+  ) {
+    $this->logger = $loggerFactory->get('iq_content_publishing');
+  }
+
+  /**
+   * Generates structured platform-specific content from a node using AI.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The source node.
+   * @param string $instructions
+   *   The AI prompt instructions (system message).
+   * @param array $outputSchema
+   *   The platform's output schema from getOutputSchema().
+   * @param string $ai_provider
+   *   Optional AI provider ID. Empty string = use site default.
+   * @param string $ai_model
+   *   Optional AI model override. Empty string = use site default.
+   *
+   * @return \Drupal\iq_content_publishing\Service\AiTransformResult
+   *   The transformation result with structured fields.
+   */
+  public function transform(NodeInterface $node, string $instructions, array $outputSchema = [], string $ai_provider = '', string $ai_model = ''): AiTransformResult {
+    try {
+      // Build the user message from node content.
+      $userMessage = $this->buildUserMessage($node);
+
+      // Build the system prompt with output schema instructions.
+      $systemPrompt = $this->buildSystemPrompt($instructions, $outputSchema, $node);
+
+      // Get AI provider and model.
+      if ($ai_provider && $ai_model) {
+        $provider = $this->aiProvider->createInstance($ai_provider);
+        $modelId = $ai_model;
+      }
+      elseif ($ai_model) {
+        $default = $this->aiProvider->getDefaultProviderForOperationType('chat');
+        $provider = $this->aiProvider->createInstance($default['provider_id']);
+        $modelId = $ai_model;
+      }
+      else {
+        $default = $this->aiProvider->getDefaultProviderForOperationType('chat');
+        $provider = $this->aiProvider->createInstance($default['provider_id']);
+        $modelId = $default['model_id'];
+      }
+
+      // Build and execute the chat input.
+      $input = new ChatInput([
+        new ChatMessage('user', $userMessage),
+      ]);
+      $input->setSystemPrompt($systemPrompt);
+
+      $response = $provider->chat($input, $modelId, ['iq_content_publishing']);
+      $generatedText = $response->getNormalized()->getText();
+
+      // Parse the AI response into structured fields.
+      $fields = $this->parseAiResponse($generatedText, $outputSchema);
+
+      return new AiTransformResult(
+        success: TRUE,
+        fields: $fields,
+        prompt: $systemPrompt,
+        userMessage: $userMessage,
+      );
+    }
+    catch (\Exception $e) {
+      $this->logger->error('AI content transformation failed for node @nid: @message', [
+        '@nid' => $node->id(),
+        '@message' => $e->getMessage(),
+      ]);
+
+      return new AiTransformResult(
+        success: FALSE,
+        fields: [],
+        prompt: $instructions,
+        userMessage: $this->buildUserMessage($node),
+        error: $e->getMessage(),
+      );
+    }
+  }
+
+  /**
+   * Builds the system prompt including JSON output schema instructions.
+   *
+   * @param string $instructions
+   *   The platform-specific AI instructions.
+   * @param array $outputSchema
+   *   The platform's output schema.
+   * @param \Drupal\node\NodeInterface $node
+   *   The source node (for token replacement).
+   *
+   * @return string
+   *   The complete system prompt.
+   */
+  protected function buildSystemPrompt(string $instructions, array $outputSchema, NodeInterface $node): string {
+    // Resolve tokens in base instructions.
+    $resolvedInstructions = $this->token->replace($instructions, ['node' => $node], ['clear' => TRUE]);
+
+    // If no schema or only a single text field with no other AI fields,
+    // fall back to simple text mode for backward compatibility.
+    $aiFields = $this->getAiGeneratedFields($outputSchema);
+    if (empty($aiFields)) {
+      return $resolvedInstructions;
+    }
+
+    // For a single AI "text" field, keep the prompt simple.
+    if (count($aiFields) === 1 && isset($aiFields['text']) && $aiFields['text']['type'] === 'textarea') {
+      return $resolvedInstructions . "\n\nOutput ONLY the final post text, nothing else.";
+    }
+
+    // Multiple AI-generated fields: instruct AI to return JSON.
+    $schemaDescription = $this->buildSchemaDescription($aiFields);
+
+    return $resolvedInstructions . "\n\n" .
+      "IMPORTANT: You MUST respond with a valid JSON object containing the following fields:\n" .
+      $schemaDescription . "\n" .
+      "Do NOT include any text outside the JSON object. Do NOT use markdown code fences.\n" .
+      "Respond with ONLY the raw JSON object.";
+  }
+
+  /**
+   * Filters the output schema to only AI-generated fields.
+   *
+   * @param array $outputSchema
+   *   The full output schema.
+   *
+   * @return array
+   *   Only fields with ai_generated === TRUE.
+   */
+  protected function getAiGeneratedFields(array $outputSchema): array {
+    return array_filter($outputSchema, function (array $field) {
+      return !empty($field['ai_generated']);
+    });
+  }
+
+  /**
+   * Builds a human-readable schema description for the AI prompt.
+   *
+   * @param array $aiFields
+   *   The AI-generated fields from the output schema.
+   *
+   * @return string
+   *   The schema description for the prompt.
+   */
+  protected function buildSchemaDescription(array $aiFields): string {
+    $lines = [];
+    foreach ($aiFields as $fieldName => $field) {
+      $desc = '- "' . $fieldName . '": ';
+      $desc .= ($field['label'] ?? $fieldName);
+
+      if (!empty($field['description'])) {
+        $desc .= ' — ' . $field['description'];
+      }
+
+      $constraints = [];
+      if (!empty($field['required'])) {
+        $constraints[] = 'required';
+      }
+      if (!empty($field['max_length'])) {
+        $constraints[] = 'max ' . $field['max_length'] . ' characters';
+      }
+      if ($field['type'] === 'textfield') {
+        $constraints[] = 'short single-line text';
+      }
+      elseif ($field['type'] === 'textarea') {
+        $constraints[] = 'multi-line text';
+      }
+      elseif ($field['type'] === 'url') {
+        $constraints[] = 'valid URL';
+      }
+
+      if (!empty($constraints)) {
+        $desc .= ' (' . implode(', ', $constraints) . ')';
+      }
+
+      $lines[] = $desc;
+    }
+
+    return implode("\n", $lines);
+  }
+
+  /**
+   * Parses the AI response into structured fields.
+   *
+   * Handles two modes:
+   * - Single text field: returns the raw text as the field value.
+   * - Multiple fields: parses JSON response and maps to field names.
+   *
+   * @param string $response
+   *   The raw AI response text.
+   * @param array $outputSchema
+   *   The platform's output schema.
+   *
+   * @return array
+   *   Structured fields keyed by schema field names.
+   */
+  protected function parseAiResponse(string $response, array $outputSchema): array {
+    $aiFields = $this->getAiGeneratedFields($outputSchema);
+
+    // Single text field mode: return the response as-is.
+    if (count($aiFields) === 1 && isset($aiFields['text']) && $aiFields['text']['type'] === 'textarea') {
+      return ['text' => trim($response)];
+    }
+
+    // Multi-field JSON mode: parse the response.
+    $cleanedResponse = $this->cleanJsonResponse($response);
+    $decoded = json_decode($cleanedResponse, TRUE);
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+      $this->logger->warning('AI returned non-JSON response, falling back to text field. Response: @response', [
+        '@response' => mb_substr($response, 0, 500),
+      ]);
+      // Fallback: put the whole response in the first text field.
+      $firstField = array_key_first($aiFields);
+      return [$firstField => trim($response)];
+    }
+
+    // Map the decoded JSON to the expected fields.
+    $fields = [];
+    foreach ($aiFields as $fieldName => $fieldDef) {
+      $fields[$fieldName] = $decoded[$fieldName] ?? '';
+    }
+
+    return $fields;
+  }
+
+  /**
+   * Cleans potential markdown formatting from a JSON response.
+   *
+   * Some AI models wrap JSON in ```json ... ``` blocks.
+   *
+   * @param string $response
+   *   The raw AI response.
+   *
+   * @return string
+   *   The cleaned response.
+   */
+  protected function cleanJsonResponse(string $response): string {
+    $response = trim($response);
+
+    // Remove markdown code fences.
+    if (preg_match('/^```(?:json)?\s*\n?(.*?)\n?\s*```$/s', $response, $matches)) {
+      return trim($matches[1]);
+    }
+
+    return $response;
+  }
+
+  /**
+   * Builds the user message from node content.
+   *
+   * Extracts key fields from the node and formats them into a
+   * structured prompt for the AI.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The source node.
+   *
+   * @return string
+   *   The formatted user message.
+   */
+  protected function buildUserMessage(NodeInterface $node): string {
+    $parts = [];
+    $parts[] = 'Title: ' . $node->getTitle();
+
+    // Try to get the body or summary.
+    if ($node->hasField('body') && !$node->get('body')->isEmpty()) {
+      $body = $node->get('body')->first();
+      $summary = $body->summary ?? '';
+      $value = $body->value ?? '';
+      if ($summary) {
+        $parts[] = 'Summary: ' . strip_tags($summary);
+      }
+      if ($value) {
+        $parts[] = 'Content: ' . strip_tags($value);
+      }
+    }
+
+    // Add the node URL.
+    try {
+      $url = $node->toUrl('canonical', ['absolute' => TRUE])->toString();
+      $parts[] = 'URL: ' . $url;
+    }
+    catch (\Exception) {
+      // Node may not have a URL yet.
+    }
+
+    // Add content type.
+    $parts[] = 'Content type: ' . $node->getType();
+
+    return implode("\n\n", $parts);
+  }
+
+}

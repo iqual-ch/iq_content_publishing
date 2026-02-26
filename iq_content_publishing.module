@@ -1,0 +1,93 @@
+<?php
+
+/**
+ * @file
+ * Hook implementations for the Content Publishing module.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_form_alter().
+ *
+ * Adds a "Publish externally" action button to node edit forms
+ * when the node is already published and platforms are available.
+ */
+function iq_content_publishing_form_alter(array &$form, FormStateInterface $form_state, string $form_id): void {
+  // Only act on node forms.
+  $form_object = $form_state->getFormObject();
+  if (!$form_object instanceof \Drupal\Core\Entity\ContentEntityFormInterface) {
+    return;
+  }
+
+  $entity = $form_object->getEntity();
+  if ($entity->getEntityTypeId() !== 'node') {
+    return;
+  }
+
+  // Only show on existing (saved) nodes.
+  if ($entity->isNew()) {
+    return;
+  }
+
+  // Check if the module is globally enabled.
+  $config = \Drupal::config('iq_content_publishing.settings');
+  if (!$config->get('enabled')) {
+    return;
+  }
+
+  // Check if the user has permission.
+  if (!\Drupal::currentUser()->hasPermission('publish to external platforms')) {
+    return;
+  }
+
+  // Only show the button if the node is currently published.
+  if (!$entity->isPublished()) {
+    return;
+  }
+
+  // Check if there are any platforms available for this content type.
+  /** @var \Drupal\iq_content_publishing\Service\ContentPublishingManager $manager */
+  $manager = \Drupal::service('iq_content_publishing.manager');
+  $platforms = $manager->getAvailablePlatforms($entity->bundle());
+  if (empty($platforms)) {
+    return;
+  }
+
+  // Add the "Publish externally" action button as a plain link.
+  $form['actions']['publish_externally'] = [
+    '#type' => 'link',
+    '#title' => t('Publish externally'),
+    '#url' => Url::fromRoute('iq_content_publishing.select_platforms', [
+      'node' => $entity->id(),
+    ]),
+    '#attributes' => [
+      'class' => ['button', 'button--secondary'],
+    ],
+    '#weight' => 50,
+  ];
+}
+
+/**
+ * Implements hook_entity_extra_field_info().
+ *
+ * Adds a pseudo-field "Publishing Log" tab to node entity displays.
+ */
+function iq_content_publishing_entity_extra_field_info(): array {
+  $extra = [];
+  $node_types = \Drupal::entityTypeManager()->getStorage('node_type')->loadMultiple();
+
+  foreach ($node_types as $bundle) {
+    $extra['node'][$bundle->id()]['display']['publishing_log'] = [
+      'label' => t('Publishing Log'),
+      'description' => t('History of external publishing operations.'),
+      'weight' => 100,
+      'visible' => FALSE,
+    ];
+  }
+
+  return $extra;
+}

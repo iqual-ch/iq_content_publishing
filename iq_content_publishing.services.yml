@@ -1,0 +1,28 @@
+services:
+  plugin.manager.content_publishing_platform:
+    class: Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager
+    parent: default_plugin_manager
+
+  iq_content_publishing.manager:
+    class: Drupal\iq_content_publishing\Service\ContentPublishingManager
+    arguments:
+      - '@plugin.manager.content_publishing_platform'
+      - '@entity_type.manager'
+      - '@iq_content_publishing.ai_transformer'
+      - '@iq_content_publishing.image_extractor'
+      - '@queue'
+      - '@logger.factory'
+      - '@current_user'
+
+  iq_content_publishing.ai_transformer:
+    class: Drupal\iq_content_publishing\Service\AiContentTransformer
+    arguments:
+      - '@ai.provider'
+      - '@token'
+      - '@logger.factory'
+
+  iq_content_publishing.image_extractor:
+    class: Drupal\iq_content_publishing\Service\NodeImageExtractor
+    arguments:
+      - '@entity_type.manager'
+      - '@file_url_generator'

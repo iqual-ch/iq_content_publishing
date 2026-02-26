@@ -1,0 +1,20 @@
+id: mock_social
+label: 'Mock Social Platform'
+description: 'A simulated social media platform for testing the publishing workflow. Check the Mock API Log tab for request details.'
+plugin_id: mock_social
+review_mode: true
+processing_mode: sync
+content_types: []
+ai_instructions: ''
+ai_provider: ''
+ai_model: ''
+resubmit_behavior: warn
+credentials:
+  api_key: 'mock-api-key-12345'
+  api_secret: 'mock-secret-abcdef'
+plugin_settings:
+  simulate_failure: false
+  simulated_delay_ms: 0
+  simulated_external_id: 'mock-post'
+  simulated_platform_url: 'https://mock-social.example.com/posts'
+status: true
