@@ -254,7 +254,15 @@ final class AiContentTransformer {
       return $this->mapDecodedFields($decoded, $aiFields);
     }
 
-    // Strategy 2: Extract fields using regex from the raw response.
+    // Strategy 2: Repair common JSON issues (unquoted values) and re-try.
+    $repairedJson = $this->repairJson($cleanedResponse, array_keys($aiFields));
+    $decoded = json_decode($repairedJson, TRUE);
+    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+      $this->logger->notice('Parsed AI response after JSON repair (unquoted values).');
+      return $this->mapDecodedFields($decoded, $aiFields);
+    }
+
+    // Strategy 3: Extract fields using regex from the raw response.
     $regexFields = $this->extractFieldsViaRegex($response, $aiFields);
     if (!empty($regexFields)) {
       $this->logger->notice('Recovered fields via regex extraction from malformed response.');
@@ -293,8 +301,8 @@ final class AiContentTransformer {
    * Extracts field values from a response using regex as a last resort.
    *
    * Handles cases where the AI returns near-JSON but with formatting
-   * issues that prevent proper JSON parsing. Looks for "key": "value"
-   * patterns for each expected field.
+   * issues that prevent proper JSON parsing. Tries quoted values first,
+   * then falls back to unquoted values using known field boundaries.
    *
    * @param string $response
    *   The raw AI response.
@@ -309,19 +317,84 @@ final class AiContentTransformer {
     $fieldNames = array_keys($aiFields);
 
     foreach ($fieldNames as $fieldName) {
-      // Match "fieldName": "value" or "fieldName": "value with \"escapes\""
-      // Also handle the value spanning multiple lines.
+      // Try A: properly quoted value — "fieldName": "value".
       $pattern = '/"' . preg_quote($fieldName, '/') . '"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/s';
       if (preg_match($pattern, $response, $matches)) {
-        // Properly unescape JSON string escapes by wrapping in quotes and
-        // decoding as a JSON string. This handles \n, \t, \", \\, \uXXXX, etc.
         $unescaped = json_decode('"' . $matches[1] . '"');
         $fields[$fieldName] = is_string($unescaped) ? $unescaped : $matches[1];
+        continue;
+      }
+
+      // Try B: unquoted or partially-quoted value.
+      // Use known field names and closing brace as boundary markers.
+      $boundaries = ['\s*}'];
+      foreach ($fieldNames as $otherField) {
+        if ($otherField !== $fieldName) {
+          $boundaries[] = '\s*,\s*"' . preg_quote($otherField, '/') . '"';
+        }
+      }
+      $boundaryLookahead = '(?=' . implode('|', $boundaries) . ')';
+      $pattern = '/"' . preg_quote($fieldName, '/') . '"\s*:\s*(.+?)' . $boundaryLookahead . '/s';
+      if (preg_match($pattern, $response, $matches)) {
+        $value = trim($matches[1]);
+        // Handle partially-quoted values (missing opening quote).
+        if (str_starts_with($value, '"') && str_ends_with($value, '"')) {
+          $decoded = json_decode($value);
+          $value = is_string($decoded) ? $decoded : substr($value, 1, -1);
+        }
+        elseif (str_ends_with($value, '"')) {
+          $value = substr($value, 0, -1);
+        }
+        $fields[$fieldName] = $value;
       }
     }
 
     // Only consider it a success if we extracted at least one field.
     return !empty($fields) ? $fields : [];
+  }
+
+  /**
+   * Attempts to repair malformed JSON by fixing unquoted string values.
+   *
+   * Uses known field names to identify value boundaries and properly
+   * quote values that the AI returned without quotes.
+   *
+   * @param string $json
+   *   The JSON string (already cleaned via cleanJsonResponse).
+   * @param array $fieldNames
+   *   The expected field names from the output schema.
+   *
+   * @return string
+   *   The repaired JSON string.
+   */
+  protected function repairJson(string $json, array $fieldNames): string {
+    foreach ($fieldNames as $fieldName) {
+      $quotedName = preg_quote($fieldName, '/');
+
+      // Build boundary lookahead from other known fields and closing brace.
+      $boundaries = ['\s*}'];
+      foreach ($fieldNames as $other) {
+        if ($other !== $fieldName) {
+          $boundaries[] = '\s*,\s*"' . preg_quote($other, '/') . '"';
+        }
+      }
+      $boundary = '(?=' . implode('|', $boundaries) . ')';
+
+      // Match "fieldName": followed by a value that does NOT start with ".
+      $pattern = '/("' . $quotedName . '"\s*:\s*)(?!")(.+?)' . $boundary . '/s';
+
+      $json = preg_replace_callback($pattern, function (array $m): string {
+        $value = trim($m[2]);
+        // Strip trailing quote if the AI only forgot the opening one.
+        if (str_ends_with($value, '"')) {
+          $value = substr($value, 0, -1);
+        }
+        // Use json_encode to properly escape and quote the value.
+        return $m[1] . json_encode($value, JSON_UNESCAPED_UNICODE);
+      }, $json);
+    }
+
+    return $json;
   }
 
   /**

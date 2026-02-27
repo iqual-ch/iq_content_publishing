@@ -7,7 +7,6 @@ namespace Drupal\iq_content_publishing\Service;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\Core\Session\AccountProxyInterface;
-use Drupal\iq_content_publishing\Entity\PublishingLog;
 use Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
 use Drupal\iq_content_publishing\Plugin\PublishingResult;
