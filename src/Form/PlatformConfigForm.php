@@ -84,8 +84,8 @@ final class PlatformConfigForm extends EntityForm {
       '#empty_option' => $this->t('- Select a platform -'),
       '#description' => $this->t('The platform plugin that handles API communication. Install additional modules to add more platforms.'),
       '#ajax' => [
-        'callback' => '::pluginSettingsAjax',
-        'wrapper' => 'plugin-settings-wrapper',
+        'callback' => '::pluginDependentSettingsAjax',
+        'wrapper' => 'plugin-dependent-settings',
       ],
     ];
 
@@ -141,16 +141,26 @@ final class PlatformConfigForm extends EntityForm {
       '#description' => $this->t('Select which content types can be published to this platform. Leave all unchecked to enable for all types.'),
     ];
 
+    // Wrapper for all plugin-dependent sections (refreshed via AJAX).
+    $form['plugin_dependent'] = [
+      '#type' => 'container',
+      '#attributes' => ['id' => 'plugin-dependent-settings'],
+    ];
+
     // AI configuration.
-    $form['ai'] = [
+    $form['plugin_dependent']['ai'] = [
       '#type' => 'details',
       '#title' => $this->t('AI Configuration'),
       '#open' => TRUE,
     ];
 
     // Try to get default instructions from the plugin.
+    // During AJAX rebuilds, getValue() may not yet be populated, so check
+    // user input first, then fall back to the entity's stored value.
     $defaultInstructions = '';
-    $pluginId = $form_state->getValue('plugin_id') ?: $entity->getPluginId();
+    $pluginId = $form_state->getValue('plugin_id')
+      ?? ($form_state->getUserInput()['plugin_id'] ?? NULL)
+      ?: $entity->getPluginId();
     if ($pluginId && $this->pluginManager->hasDefinition($pluginId)) {
       try {
         $plugin = $this->pluginManager->createInstance($pluginId);
@@ -161,10 +171,26 @@ final class PlatformConfigForm extends EntityForm {
       }
     }
 
-    $form['ai']['ai_instructions'] = [
+    // On AJAX rebuild triggered by plugin_id change, Drupal ignores
+    // #default_value and repopulates from user input. We must inject the
+    // plugin default into user input so the textarea actually shows it.
+    $triggeringElement = $form_state->getTriggeringElement();
+    $isPluginChange = $triggeringElement && ($triggeringElement['#name'] ?? '') === 'plugin_id';
+
+    $currentInstructions = $entity->getAiInstructions();
+    if ($isPluginChange && $entity->isNew() && empty($currentInstructions)) {
+      // Plugin just changed — force the default instructions into user input.
+      $input = $form_state->getUserInput();
+      $input['ai_instructions'] = $defaultInstructions;
+      $form_state->setUserInput($input);
+    }
+
+    $instructionsDefault = $currentInstructions ?: $defaultInstructions;
+
+    $form['plugin_dependent']['ai']['ai_instructions'] = [
       '#type' => 'textarea',
       '#title' => $this->t('AI prompt instructions'),
-      '#default_value' => $entity->getAiInstructions() ?: $defaultInstructions,
+      '#default_value' => $instructionsDefault,
       '#rows' => 8,
       '#description' => $this->t('Instructions for the AI to transform node content for this platform. Supports tokens like [node:title], [node:url]. Leave empty to use the plugin default.'),
     ];
@@ -179,7 +205,7 @@ final class PlatformConfigForm extends EntityForm {
     }
 
     $this->aiFormHelper->generateAiProvidersForm(
-      $form['ai'],
+      $form['plugin_dependent']['ai'],
       $form_state,
       'chat',
       'ai',
@@ -191,19 +217,14 @@ final class PlatformConfigForm extends EntityForm {
       TRUE,
     );
 
-    // Plugin-specific settings (dynamic).
-    $form['plugin_settings_wrapper'] = [
-      '#type' => 'container',
-      '#attributes' => ['id' => 'plugin-settings-wrapper'],
-    ];
-
+    // Plugin-specific settings (dynamic, inside the AJAX wrapper).
     if ($pluginId && $this->pluginManager->hasDefinition($pluginId)) {
       try {
         $plugin = $this->pluginManager->createInstance($pluginId);
 
         $credentials_form = $plugin->buildCredentialsForm([], $entity->getCredentials());
         if (!empty($credentials_form)) {
-          $form['plugin_settings_wrapper']['credentials'] = [
+          $form['plugin_dependent']['credentials'] = [
             '#type' => 'details',
             '#title' => $this->t('Credentials'),
             '#open' => TRUE,
@@ -212,7 +233,7 @@ final class PlatformConfigForm extends EntityForm {
 
         $settings_form = $plugin->buildSettingsForm([], $entity->getPluginSettings());
         if (!empty($settings_form)) {
-          $form['plugin_settings_wrapper']['plugin_settings'] = [
+          $form['plugin_dependent']['plugin_settings'] = [
             '#type' => 'details',
             '#title' => $this->t('Platform Settings'),
             '#open' => TRUE,
@@ -220,7 +241,7 @@ final class PlatformConfigForm extends EntityForm {
         }
       }
       catch (\Exception) {
-        $form['plugin_settings_wrapper']['notice'] = [
+        $form['plugin_dependent']['notice'] = [
           '#markup' => '<p>' . $this->t('Could not load plugin settings. Make sure the platform module is enabled.') . '</p>',
         ];
       }
@@ -231,9 +252,12 @@ final class PlatformConfigForm extends EntityForm {
 
   /**
    * AJAX callback for plugin selection.
+   *
+   * Returns the entire plugin-dependent section (AI config + credentials +
+   * plugin settings) so that changing the plugin refreshes everything.
    */
-  public function pluginSettingsAjax(array &$form, FormStateInterface $form_state): array {
-    return $form['plugin_settings_wrapper'];
+  public function pluginDependentSettingsAjax(array &$form, FormStateInterface $form_state): array {
+    return $form['plugin_dependent'];
   }
 
   /**
