@@ -380,6 +380,7 @@ final class PublishingReviewForm extends FormBase {
     $logLink = Link::fromTextAndUrl($this->t('View publishing log'), Url::fromRoute('iq_content_publishing.node_log', ['node' => $nid]))->toString();
 
     foreach ($platformIds as $platformId) {
+      if (empty($platforms[$platformId]['enabled'])) {
         continue;
       }
 
