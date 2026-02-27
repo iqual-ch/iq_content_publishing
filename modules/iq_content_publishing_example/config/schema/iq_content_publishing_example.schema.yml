@@ -1,4 +1,4 @@
-iq_content_publishing_example.credentials.mock_social:
+iq_content_publishing.credentials.mock_social:
   type: mapping
   label: 'Mock Social credentials'
   mapping:
@@ -9,7 +9,7 @@ iq_content_publishing_example.credentials.mock_social:
       type: string
       label: 'API Secret (mock)'
 
-iq_content_publishing_example.settings.mock_social:
+iq_content_publishing.settings.mock_social:
   type: mapping
   label: 'Mock Social platform settings'
   mapping:

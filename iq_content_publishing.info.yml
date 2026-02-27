@@ -6,5 +6,4 @@ core_version_requirement: ^11
 configure: entity.publishing_platform.collection
 dependencies:
   - drupal:node
-  - drupal:content_moderation
   - ai:ai

@@ -53,10 +53,8 @@ iq_content_publishing.platform.*:
       type: string
       label: 'Re-submission behavior (allow, warn, or block)'
     credentials:
-      type: mapping
+      type: iq_content_publishing.credentials.[%parent.plugin_id]
       label: 'Platform credentials'
-      mapping: {}
     plugin_settings:
-      type: mapping
+      type: iq_content_publishing.settings.[%parent.plugin_id]
       label: 'Platform-specific settings'
-      mapping: {}

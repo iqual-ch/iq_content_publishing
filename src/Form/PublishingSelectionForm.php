@@ -8,6 +8,7 @@ use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Url;
 use Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface;
 use Drupal\iq_content_publishing\Service\ContentPublishingManager;
@@ -27,6 +28,7 @@ final class PublishingSelectionForm extends FormBase {
     protected ContentPublishingManager $publishingManager,
     protected EntityTypeManagerInterface $entityTypeManager,
     protected DateFormatterInterface $dateFormatter,
+    protected PrivateTempStoreFactory $tempStoreFactory,
   ) {}
 
   /**
@@ -37,6 +39,7 @@ final class PublishingSelectionForm extends FormBase {
       $container->get('iq_content_publishing.manager'),
       $container->get('entity_type.manager'),
       $container->get('date.formatter'),
+      $container->get('tempstore.private'),
     );
   }
 
@@ -218,7 +221,7 @@ final class PublishingSelectionForm extends FormBase {
 
     // If there are review-mode platforms, redirect to the review form.
     if (!empty($reviewPlatforms)) {
-      $tempStore = \Drupal::service('tempstore.private')->get('iq_content_publishing');
+      $tempStore = $this->tempStoreFactory->get('iq_content_publishing');
       $tempStore->set('review_platform_ids', array_keys($reviewPlatforms));
 
       $form_state->setRedirectUrl(Url::fromRoute('iq_content_publishing.review', [

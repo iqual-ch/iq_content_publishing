@@ -5,12 +5,28 @@ declare(strict_types=1);
 namespace Drupal\iq_content_publishing\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Datetime\DateFormatterInterface;
+use Drupal\Core\Url;
 use Drupal\node\NodeInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
  * Controller for the publishing log views.
  */
 final class PublishingLogController extends ControllerBase {
+
+  public function __construct(
+    protected DateFormatterInterface $dateFormatter,
+  ) {}
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container): static {
+    return new static(
+      $container->get('date.formatter'),
+    );
+  }
 
   /**
    * Displays the global publishing log overview.
@@ -76,11 +92,11 @@ final class PublishingLogController extends ControllerBase {
       $externalUrl = $log->get('external_url')->value ?? '';
       $externalId = $log->get('external_id')->value ?? '';
       $externalCell = $externalUrl
-        ? ['data' => ['#type' => 'link', '#title' => $externalId ?: $this->t('View'), '#url' => \Drupal\Core\Url::fromUri($externalUrl), '#attributes' => ['target' => '_blank']]]
+        ? ['data' => ['#type' => 'link', '#title' => $externalId ?: $this->t('View'), '#url' => Url::fromUri($externalUrl), '#attributes' => ['target' => '_blank']]]
         : ($externalId ?: '-');
 
       $rows[] = [
-        \Drupal::service('date.formatter')->format($log->get('created')->value, 'short'),
+        $this->dateFormatter->format($log->get('created')->value, 'short'),
         $node ? $node->toLink()->toString() : $this->t('Deleted'),
         $log->get('platform_id')->value,
         $log->get('status_code')->value,

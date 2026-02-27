@@ -79,8 +79,8 @@ final class MockApiLogController extends ControllerBase {
 
     $rows = [];
     foreach ($log as $originalIndex => $entry) {
-      $contentPreview = mb_substr($entry['content_published'] ?? '', 0, 80);
-      if (mb_strlen($entry['content_published'] ?? '') > 80) {
+      $contentPreview = mb_substr($entry['content_preview'] ?? '', 0, 80);
+      if (mb_strlen($entry['content_preview'] ?? '') > 80) {
         $contentPreview .= '…';
       }
 
@@ -178,7 +178,7 @@ final class MockApiLogController extends ControllerBase {
     ];
     $build['content']['text'] = [
       '#type' => 'item',
-      '#markup' => '<pre style="white-space: pre-wrap; background: #f5f5f5; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">' . htmlspecialchars($entry['content_published'] ?? '') . '</pre>',
+      '#markup' => '<pre style="white-space: pre-wrap; background: #f5f5f5; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">' . htmlspecialchars($entry['content_preview'] ?? '') . '</pre>',
     ];
 
     // Full request.

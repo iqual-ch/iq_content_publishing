@@ -11,7 +11,6 @@ declare(strict_types=1);
  * Implements hook_uninstall().
  */
 function iq_content_publishing_uninstall(): void {
-  // Delete all publishing_log content entities.
   $entity_type_manager = \Drupal::entityTypeManager();
 
   // Delete all publishing_platform config entities.
