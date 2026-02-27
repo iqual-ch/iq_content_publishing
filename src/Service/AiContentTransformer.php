@@ -147,8 +147,12 @@ final class AiContentTransformer {
   /**
    * Checks if the given provider/model supports native structured output.
    *
+   * Uses AiProviderClientBase::modelSupportsCapabilities() which is
+   * forwarded by ProviderProxy via __call(). Do NOT use method_exists()
+   * as ProviderProxy delegates via magic methods.
+   *
    * @param object $provider
-   *   The AI provider plugin instance.
+   *   The AI provider proxy (ProviderProxy) or plugin instance.
    * @param string $modelId
    *   The model identifier.
    *
@@ -157,13 +161,9 @@ final class AiContentTransformer {
    */
   protected function supportsStructuredOutput(object $provider, string $modelId): bool {
     try {
-      if (!method_exists($provider, 'getModelCapabilities')) {
-        return FALSE;
-      }
-      $capabilities = $provider->getModelCapabilities('chat', $modelId);
-      if (is_array($capabilities)) {
-        return in_array(AiModelCapability::ChatStructuredResponse, $capabilities, TRUE);
-      }
+      return $provider->modelSupportsCapabilities('chat', $modelId, [
+        AiModelCapability::ChatStructuredResponse,
+      ]);
     }
     catch (\Exception $e) {
       $this->logger->debug('Could not check model capabilities: @msg', [
