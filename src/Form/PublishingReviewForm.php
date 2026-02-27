@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
+use Drupal\Core\Link;
 use Drupal\Core\Url;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
 use Drupal\iq_content_publishing\Service\ContentPublishingManager;
@@ -376,9 +377,9 @@ final class PublishingReviewForm extends FormBase {
     $platforms = $form_state->getValue('platforms', []);
     $platformStorage = $this->entityTypeManager->getStorage('publishing_platform');
     $generatedContents = $form_state->get('generated_contents') ?? [];
+    $logLink = Link::fromTextAndUrl($this->t('View publishing log'), Url::fromRoute('iq_content_publishing.node_log', ['node' => $nid]))->toString();
 
     foreach ($platformIds as $platformId) {
-      if (empty($platforms[$platformId]['enabled'])) {
         continue;
       }
 
@@ -423,25 +424,28 @@ final class PublishingReviewForm extends FormBase {
       $publishResult = $this->publishingManager->publish($node, $platform, $fields);
 
       if ($publishResult === NULL) {
-        $this->messenger()->addStatus($this->t('@platform: queued for processing.', [
+        $this->messenger()->addStatus($this->t('@platform: queued for processing. @log_link', [
           '@platform' => $platform->label(),
+          '@log_link' => $logLink,
         ]));
       }
       elseif ($publishResult->success) {
-        $this->messenger()->addStatus($this->t('@platform: published successfully.', [
+        $this->messenger()->addStatus($this->t('@platform: published successfully. @log_link', [
           '@platform' => $platform->label(),
+          '@log_link' => $logLink,
         ]));
       }
       else {
-        $this->messenger()->addError($this->t('@platform: failed — @message', [
+        $this->messenger()->addError($this->t('@platform: failed — @message. @log_link', [
           '@platform' => $platform->label(),
           '@message' => $publishResult->message,
+          '@log_link' => $logLink,
         ]));
       }
     }
 
-    // Redirect back to the node.
-    $form_state->setRedirectUrl(Url::fromRoute('entity.node.canonical', [
+    // Redirect back to the node edit form.
+    $form_state->setRedirectUrl(Url::fromRoute('entity.node.edit_form', [
       'node' => $nid,
     ]));
   }
