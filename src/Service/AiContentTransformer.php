@@ -31,6 +31,7 @@ final class AiContentTransformer {
   public function __construct(
     protected AiProviderPluginManager $aiProvider,
     protected Token $token,
+    protected NodeContentExtractor $contentExtractor,
     \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerFactory,
   ) {
     $this->logger = $loggerFactory->get('iq_content_publishing');
@@ -55,8 +56,8 @@ final class AiContentTransformer {
    */
   public function transform(NodeInterface $node, string $instructions, array $outputSchema = [], string $ai_provider = '', string $ai_model = ''): AiTransformResult {
     try {
-      // Build the user message from node content.
-      $userMessage = $this->buildUserMessage($node);
+      // Extract node content as Markdown via the dedicated view mode.
+      $userMessage = $this->contentExtractor->extract($node);
 
       // Build the system prompt with output schema instructions.
       $systemPrompt = $this->buildSystemPrompt($instructions, $outputSchema, $node);
@@ -106,7 +107,7 @@ final class AiContentTransformer {
         success: FALSE,
         fields: [],
         prompt: $instructions,
-        userMessage: $this->buildUserMessage($node),
+        userMessage: $this->contentExtractor->extract($node),
         error: $e->getMessage(),
       );
     }
@@ -129,22 +130,28 @@ final class AiContentTransformer {
     // Resolve tokens in base instructions.
     $resolvedInstructions = $this->token->replace($instructions, ['node' => $node], ['clear' => TRUE]);
 
+    // Preamble: explain the input format to the AI.
+    $preamble = "You are a content transformation assistant. " .
+      "You will receive a piece of web content converted to Markdown. " .
+      "Use this content as the sole source material for your output. " .
+      "Ignore any residual markup artifacts or navigation elements.\n\n";
+
     // If no schema or only a single text field with no other AI fields,
     // fall back to simple text mode for backward compatibility.
     $aiFields = $this->getAiGeneratedFields($outputSchema);
     if (empty($aiFields)) {
-      return $resolvedInstructions;
+      return $preamble . $resolvedInstructions;
     }
 
     // For a single AI "text" field, keep the prompt simple.
     if (count($aiFields) === 1 && isset($aiFields['text']) && $aiFields['text']['type'] === 'textarea') {
-      return $resolvedInstructions . "\n\nOutput ONLY the final post text, nothing else.";
+      return $preamble . $resolvedInstructions . "\n\nOutput ONLY the final post text, nothing else.";
     }
 
     // Multiple AI-generated fields: instruct AI to return JSON.
     $schemaDescription = $this->buildSchemaDescription($aiFields);
 
-    return $resolvedInstructions . "\n\n" .
+    return $preamble . $resolvedInstructions . "\n\n" .
       "IMPORTANT: You MUST respond with a valid JSON object containing the following fields:\n" .
       $schemaDescription . "\n" .
       "Do NOT include any text outside the JSON object. Do NOT use markdown code fences.\n" .
@@ -277,50 +284,6 @@ final class AiContentTransformer {
     }
 
     return $response;
-  }
-
-  /**
-   * Builds the user message from node content.
-   *
-   * Extracts key fields from the node and formats them into a
-   * structured prompt for the AI.
-   *
-   * @param \Drupal\node\NodeInterface $node
-   *   The source node.
-   *
-   * @return string
-   *   The formatted user message.
-   */
-  protected function buildUserMessage(NodeInterface $node): string {
-    $parts = [];
-    $parts[] = 'Title: ' . $node->getTitle();
-
-    // Try to get the body or summary.
-    if ($node->hasField('body') && !$node->get('body')->isEmpty()) {
-      $body = $node->get('body')->first();
-      $summary = $body->summary ?? '';
-      $value = $body->value ?? '';
-      if ($summary) {
-        $parts[] = 'Summary: ' . strip_tags($summary);
-      }
-      if ($value) {
-        $parts[] = 'Content: ' . strip_tags($value);
-      }
-    }
-
-    // Add the node URL.
-    try {
-      $url = $node->toUrl('canonical', ['absolute' => TRUE])->toString();
-      $parts[] = 'URL: ' . $url;
-    }
-    catch (\Exception) {
-      // Node may not have a URL yet.
-    }
-
-    // Add content type.
-    $parts[] = 'Content type: ' . $node->getType();
-
-    return implode("\n\n", $parts);
   }
 
 }

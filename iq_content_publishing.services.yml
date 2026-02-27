@@ -19,7 +19,14 @@ services:
     arguments:
       - '@ai.provider'
       - '@token'
+      - '@iq_content_publishing.content_extractor'
       - '@logger.factory'
+
+  iq_content_publishing.content_extractor:
+    class: Drupal\iq_content_publishing\Service\NodeContentExtractor
+    arguments:
+      - '@entity_type.manager'
+      - '@renderer'
 
   iq_content_publishing.image_extractor:
     class: Drupal\iq_content_publishing\Service\NodeImageExtractor

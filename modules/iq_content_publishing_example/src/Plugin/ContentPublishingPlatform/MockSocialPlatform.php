@@ -92,7 +92,7 @@ final class MockSocialPlatform extends ContentPublishingPlatformBase {
    */
   public function getDefaultAiInstructions(): string {
     return <<<'INSTRUCTIONS'
-Transform the following Drupal content into a compelling social media post.
+Transform the provided Markdown content into a compelling social media post.
 
 Guidelines:
 - Keep the post text concise and engaging (under 280 characters preferred).
@@ -100,15 +100,10 @@ Guidelines:
 - Include a clear call-to-action in the text.
 - Provide 2-3 relevant hashtags as a space-separated string.
 - Maintain a professional yet approachable tone.
-- Do NOT include any markdown formatting.
+- Do NOT include any markdown formatting in the output.
 - Do NOT include the URL in the text field (it will be added separately).
 - Do NOT include hashtags in the text field (use the hashtags field).
-
-Available tokens:
-- [node:title] — The content title.
-- [node:url] — The full URL to the content.
-- [node:summary] — The content summary/teaser.
-- [node:content_type] — The content type label.
+- Focus on the main content — ignore any navigation, sidebar, or layout artifacts.
 INSTRUCTIONS;
   }
 
