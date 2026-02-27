@@ -81,7 +81,13 @@ final class PublishingReviewForm extends FormBase {
     }
 
     if (empty($platformIds)) {
-      $this->messenger()->addWarning($this->t('No platforms selected for review.'));
+      $this->messenger()->addWarning($this->t('No platforms selected. Please select platforms first.'));
+      $url = Url::fromRoute('iq_content_publishing.select', ['node' => $node->id()]);
+      $form['redirect_message'] = [
+        '#markup' => '<p>' . $this->t('No platforms were selected for review. <a href="@url">Go back to platform selection</a>.', [
+          '@url' => $url->toString(),
+        ]) . '</p>',
+      ];
       return $form;
     }
 

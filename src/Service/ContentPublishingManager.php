@@ -151,8 +151,7 @@ final class ContentPublishingManager {
 
       switch ($fieldDef['type'] ?? '') {
         case 'image':
-          $maxImages = $fieldDef['max'] ?? 0;
-          $fields[$fieldName] = $this->contentExtractor->extractImages($node, $maxImages);
+          $fields[$fieldName] = $this->contentExtractor->extractImages($node);
           break;
 
         case 'url':

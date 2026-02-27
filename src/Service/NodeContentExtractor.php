@@ -87,8 +87,6 @@ final class NodeContentExtractor {
    *
    * @param \Drupal\node\NodeInterface $node
    *   The node to extract images from.
-   * @param int $limit
-   *   Maximum number of images to return. 0 means no limit.
    *
    * @return array
    *   Array of image data arrays, each containing:
@@ -101,7 +99,7 @@ final class NodeContentExtractor {
    *   - 'width': (int) The width in pixels, or 0 if unknown.
    *   - 'height': (int) The height in pixels, or 0 if unknown.
    */
-  public function extractImages(NodeInterface $node, int $limit = 0): array {
+  public function extractImages(NodeInterface $node): array {
     $html = $this->getRenderedHtml($node);
     if (trim($html) === '') {
       return [];
@@ -118,10 +116,6 @@ final class NodeContentExtractor {
       $seen[$image['url']] = TRUE;
       return TRUE;
     }));
-
-    if ($limit > 0 && count($images) > $limit) {
-      $images = array_slice($images, 0, $limit);
-    }
 
     return $images;
   }
