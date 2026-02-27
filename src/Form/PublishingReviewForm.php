@@ -254,15 +254,8 @@ final class PublishingReviewForm extends FormBase {
                 $filename = htmlspecialchars($imageData['filename'] ?? 'Image', ENT_QUOTES);
                 $alt = htmlspecialchars($imageData['alt'] ?? '', ENT_QUOTES);
 
-                // Use the thumbnail image style if the file has a Drupal URI.
-                $thumbnailUrl = $imageData['url'];
-                if (!empty($imageData['uri'])) {
-                  /** @var \Drupal\image\ImageStyleInterface|null $imageStyle */
-                  $imageStyle = $this->entityTypeManager->getStorage('image_style')->load('thumbnail');
-                  if ($imageStyle) {
-                    $thumbnailUrl = $imageStyle->buildUrl($imageData['uri']);
-                  }
-                }
+                // Use the thumbnail image style for the preview.
+                $thumbnailUrl = $this->buildThumbnailUrl($imageData);
 
                 $imgTag = '<div style="display:inline-block;text-align:center;margin:4px 8px 4px 0;vertical-align:top;">'
                   . '<img src="' . htmlspecialchars($thumbnailUrl, ENT_QUOTES) . '" '
@@ -583,6 +576,49 @@ final class PublishingReviewForm extends FormBase {
       ->execute();
 
     return !empty($ids) ? $logStorage->load(reset($ids)) : NULL;
+  }
+
+  /**
+   * Builds a thumbnail URL for an image, using the 'thumbnail' image style.
+   *
+   * Resolves the file URI from several sources:
+   * 1. The 'uri' key if already set (file entity was resolved).
+   * 2. The 'url' key if it contains /files/ (derive URI from URL path).
+   * 3. Falls back to the original URL as-is (external images).
+   *
+   * @param array $imageData
+   *   Image data array with 'url' and optionally 'uri'.
+   *
+   * @return string
+   *   The thumbnail URL.
+   */
+  protected function buildThumbnailUrl(array $imageData): string {
+    $uri = $imageData['uri'] ?? '';
+
+    // If no URI, try to derive it from the URL (handles image-styled URLs).
+    if (empty($uri) && !empty($imageData['url'])) {
+      $url = $imageData['url'];
+      if (preg_match('#/files/(.+?)(?:\?|$)#', $url, $matches)) {
+        $relativePath = urldecode($matches[1]);
+        // Strip existing image style path: styles/STYLE_NAME/public/...
+        if (preg_match('#^styles/[^/]+/public/(.+)$#', $relativePath, $styleMatches)) {
+          $relativePath = $styleMatches[1];
+        }
+        $uri = 'public://' . $relativePath;
+      }
+    }
+
+    // If we have a URI, generate the thumbnail style URL.
+    if (!empty($uri)) {
+      /** @var \Drupal\image\ImageStyleInterface|null $imageStyle */
+      $imageStyle = $this->entityTypeManager->getStorage('image_style')->load('thumbnail');
+      if ($imageStyle) {
+        return $imageStyle->buildUrl($uri);
+      }
+    }
+
+    // Fallback: use the original URL.
+    return $imageData['url'] ?? '';
   }
 
 }
