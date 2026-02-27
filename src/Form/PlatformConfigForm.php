@@ -228,6 +228,7 @@ final class PlatformConfigForm extends EntityForm {
             '#type' => 'details',
             '#title' => $this->t('Credentials'),
             '#open' => TRUE,
+            '#tree' => TRUE,
           ] + $credentials_form;
         }
 
@@ -237,6 +238,7 @@ final class PlatformConfigForm extends EntityForm {
             '#type' => 'details',
             '#title' => $this->t('Platform Settings'),
             '#open' => TRUE,
+            '#tree' => TRUE,
           ] + $settings_form;
         }
       }
