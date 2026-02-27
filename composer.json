@@ -10,12 +10,8 @@
         "content transformation"
     ],
     "license": "GPL-2.0-or-later",
-    "homepage": "https://www.drupal.org/project/iq_content_publishing",
+    "homepage": "https://github.com/iqual-ch/iq_content_publishing",
     "minimum-stability": "dev",
-    "support": {
-        "issues": "https://www.drupal.org/project/issues/iq_content_publishing",
-        "source": "https://git.drupalcode.org/project/iq_content_publishing"
-    },
     "require": {
         "php": ">=8.3",
         "drupal/core": "^11",
