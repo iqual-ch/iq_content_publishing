@@ -1,0 +1,23 @@
+/**
+ * @file
+ * Styles for the content publishing review form.
+ */
+
+.iq-cp-image-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.iq-cp-image-selector .form-type-radio,
+.iq-cp-image-selector .form-type-checkbox {
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+.iq-cp-image-selector img {
+  max-width: 220px;
+  max-height: 220px;
+  vertical-align: top;
+}

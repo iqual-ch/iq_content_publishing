@@ -1,0 +1,11 @@
+review_form:
+  css:
+    component:
+      css/review-form.css: {}
+
+publishing_modal:
+  js:
+    js/publishing-modal.js: {}
+  dependencies:
+    - core/drupal
+    - core/once

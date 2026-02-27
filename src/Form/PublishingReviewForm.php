@@ -96,6 +96,8 @@ final class PublishingReviewForm extends FormBase {
       '#value' => $node->id(),
     ];
 
+    $form['#attached']['library'][] = 'iq_content_publishing/review_form';
+
     $form['info'] = [
       '#markup' => '<p>' . $this->t('Review and edit the AI-generated content for "<strong>@title</strong>" before sending:', [
         '@title' => $node->getTitle(),
@@ -251,24 +253,22 @@ final class PublishingReviewForm extends FormBase {
                   continue;
                 }
                 $optionKey = (string) ($imageData['fid'] ?? $idx);
-                $filename = htmlspecialchars($imageData['filename'] ?? 'Image', ENT_QUOTES);
                 $alt = htmlspecialchars($imageData['alt'] ?? '', ENT_QUOTES);
 
-                // Use the thumbnail image style for the preview.
-                $thumbnailUrl = $this->buildThumbnailUrl($imageData);
+                // Use the medium image style for the preview.
+                $previewUrl = $this->buildPreviewImageUrl($imageData);
 
-                $imgTag = '<div style="display:inline-block;text-align:center;margin:4px 8px 4px 0;vertical-align:top;">'
-                  . '<img src="' . htmlspecialchars($thumbnailUrl, ENT_QUOTES) . '" '
-                  . 'alt="' . $alt . '" '
-                  . 'style="max-width:100px;max-height:100px;display:block;margin-bottom:4px;">'
-                  . '<small>' . $filename . '</small>'
-                  . '</div>';
+                $imgTag = '<img src="' . htmlspecialchars($previewUrl, ENT_QUOTES) . '" '
+                  . 'alt="' . $alt . '">';
                 $imageOptions[$optionKey] = $imgTag;
                 $defaultImages[] = $optionKey;
               }
             }
 
             if (!empty($imageOptions)) {
+              $wrapper_prefix = '<div class="iq-cp-image-selector">';
+              $wrapper_suffix = '</div>';
+
               if ($maxImages === 1) {
                 // Single image: radios.
                 $form['platforms'][$platformId]['fields'][$fieldName] = [
@@ -277,6 +277,8 @@ final class PublishingReviewForm extends FormBase {
                   '#options' => $imageOptions + ['_none' => $this->t('No image')],
                   '#default_value' => !empty($defaultImages) ? reset($defaultImages) : '_none',
                   '#description' => $fieldDef['description'] ?? '',
+                  '#prefix' => $wrapper_prefix,
+                  '#suffix' => $wrapper_suffix,
                 ];
               }
               else {
@@ -287,6 +289,8 @@ final class PublishingReviewForm extends FormBase {
                   '#options' => $imageOptions,
                   '#default_value' => $defaultImages,
                   '#description' => $fieldDef['description'] ?? '',
+                  '#prefix' => $wrapper_prefix,
+                  '#suffix' => $wrapper_suffix,
                 ];
               }
             }
@@ -579,7 +583,7 @@ final class PublishingReviewForm extends FormBase {
   }
 
   /**
-   * Builds a thumbnail URL for an image, using the 'thumbnail' image style.
+   * Builds a preview URL for an image, using the 'medium' image style.
    *
    * Resolves the file URI from several sources:
    * 1. The 'uri' key if already set (file entity was resolved).
@@ -590,9 +594,9 @@ final class PublishingReviewForm extends FormBase {
    *   Image data array with 'url' and optionally 'uri'.
    *
    * @return string
-   *   The thumbnail URL.
+   *   The image style URL.
    */
-  protected function buildThumbnailUrl(array $imageData): string {
+  protected function buildPreviewImageUrl(array $imageData): string {
     $uri = $imageData['uri'] ?? '';
 
     // If no URI, try to derive it from the URL (handles image-styled URLs).
@@ -611,7 +615,7 @@ final class PublishingReviewForm extends FormBase {
     // If we have a URI, generate the thumbnail style URL.
     if (!empty($uri)) {
       /** @var \Drupal\image\ImageStyleInterface|null $imageStyle */
-      $imageStyle = $this->entityTypeManager->getStorage('image_style')->load('thumbnail');
+      $imageStyle = $this->entityTypeManager->getStorage('image_style')->load('medium');
       if ($imageStyle) {
         return $imageStyle->buildUrl($uri);
       }
