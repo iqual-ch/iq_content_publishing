@@ -267,20 +267,27 @@ final class AiContentTransformer {
   /**
    * Cleans potential markdown formatting from a JSON response.
    *
-   * Some AI models wrap JSON in ```json ... ``` blocks.
+   * AI models often wrap JSON in markdown code fences, or include
+   * introductory text before the JSON object. This method extracts
+   * the actual JSON from the response.
    *
    * @param string $response
    *   The raw AI response.
    *
    * @return string
-   *   The cleaned response.
+   *   The cleaned response containing only the JSON.
    */
   protected function cleanJsonResponse(string $response): string {
     $response = trim($response);
 
-    // Remove markdown code fences.
-    if (preg_match('/^```(?:json)?\s*\n?(.*?)\n?\s*```$/s', $response, $matches)) {
+    // 1. Extract content from markdown code fences (```json ... ``` or ``` ... ```).
+    if (preg_match('/```(?:json)?\s*\n(.*?)\n\s*```/s', $response, $matches)) {
       return trim($matches[1]);
+    }
+
+    // 2. Extract the first JSON object from the response.
+    if (preg_match('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/s', $response, $matches)) {
+      return trim($matches[0]);
     }
 
     return $response;
