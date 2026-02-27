@@ -242,59 +242,58 @@ final class AiContentTransformer {
       return ['text' => trim($response)];
     }
 
-    // Multi-field JSON mode: parse the response.
+    $this->logger->debug('Raw AI response for parsing: @response', [
+      '@response' => mb_substr($response, 0, 1000),
+    ]);
+
+    // Strategy 1: Clean and parse as JSON.
     $cleanedResponse = $this->cleanJsonResponse($response);
     $decoded = json_decode($cleanedResponse, TRUE);
-
-    if (json_last_error() !== JSON_ERROR_NONE) {
-      // Try to repair common JSON issues (missing quotes, trailing commas).
-      $repaired = $this->repairJson($cleanedResponse);
-      $decoded = json_decode($repaired, TRUE);
+    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+      $this->logger->debug('Parsed via cleanJsonResponse.');
+      return $this->mapDecodedFields($decoded, $aiFields);
     }
 
-    if (json_last_error() !== JSON_ERROR_NONE) {
-      // Last resort: extract fields using regex from the raw response.
-      $regexFields = $this->extractFieldsViaRegex($response, $aiFields);
-      if (!empty($regexFields)) {
-        $this->logger->notice('AI returned malformed JSON, recovered fields via regex extraction.');
-        return $regexFields;
-      }
-
-      $this->logger->warning('AI returned non-JSON response, falling back to text field. Response: @response', [
-        '@response' => mb_substr($response, 0, 500),
-      ]);
-      $firstField = array_key_first($aiFields);
-      return [$firstField => trim($response)];
+    // Strategy 2: Try the raw trimmed response directly.
+    $decoded = json_decode(trim($response), TRUE);
+    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+      $this->logger->debug('Parsed raw response as JSON.');
+      return $this->mapDecodedFields($decoded, $aiFields);
     }
 
-    // Map the decoded JSON to the expected fields.
-    $fields = [];
-    foreach ($aiFields as $fieldName => $fieldDef) {
-      $fields[$fieldName] = $decoded[$fieldName] ?? '';
+    // Strategy 3: Extract fields using regex from the raw response.
+    $regexFields = $this->extractFieldsViaRegex($response, $aiFields);
+    if (!empty($regexFields)) {
+      $this->logger->notice('Recovered fields via regex extraction from malformed response.');
+      return $regexFields;
     }
 
-    return $fields;
+    $this->logger->warning('Could not parse AI response into structured fields. Response: @response', [
+      '@response' => mb_substr($response, 0, 500),
+    ]);
+    $firstField = array_key_first($aiFields);
+    return [$firstField => trim($response)];
   }
 
   /**
-   * Attempts to repair common JSON formatting issues from AI responses.
+   * Maps decoded JSON data to the expected AI field keys.
    *
-   * @param string $json
-   *   The malformed JSON string.
+   * @param array $decoded
+   *   The decoded JSON array.
+   * @param array $aiFields
+   *   The expected AI-generated fields.
    *
-   * @return string
-   *   The repaired JSON string.
+   * @return array
+   *   The mapped fields.
    */
-  protected function repairJson(string $json): string {
-    // Remove trailing commas before closing braces/brackets.
-    $json = preg_replace('/,\s*([\]}])/s', '$1', $json);
-
-    // Fix unquoted string values: "key": value" → "key": "value"
-    // Matches a key followed by a colon, optional whitespace, then a
-    // non-quoted value that runs until a quote+comma or quote+closing brace.
-    $json = preg_replace('/"(\w+)":\s*(?!")(.+?)(",|\n|$)/m', '"$1": "$2$3', $json);
-
-    return $json;
+  protected function mapDecodedFields(array $decoded, array $aiFields): array {
+    $fields = [];
+    foreach ($aiFields as $fieldName => $fieldDef) {
+      $value = $decoded[$fieldName] ?? '';
+      // Ensure we always return strings.
+      $fields[$fieldName] = is_array($value) ? json_encode($value) : (string) $value;
+    }
+    return $fields;
   }
 
   /**
@@ -351,9 +350,11 @@ final class AiContentTransformer {
       return trim($matches[1]);
     }
 
-    // 2. Extract the first JSON object from the response.
-    if (preg_match('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/s', $response, $matches)) {
-      return trim($matches[0]);
+    // 2. Find the first { and last } to extract the JSON object.
+    $firstBrace = strpos($response, '{');
+    $lastBrace = strrpos($response, '}');
+    if ($firstBrace !== FALSE && $lastBrace !== FALSE && $lastBrace > $firstBrace) {
+      return substr($response, $firstBrace, $lastBrace - $firstBrace + 1);
     }
 
     return $response;

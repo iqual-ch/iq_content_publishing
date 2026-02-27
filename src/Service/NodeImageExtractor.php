@@ -6,18 +6,32 @@ namespace Drupal\iq_content_publishing\Service;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\File\FileUrlGeneratorInterface;
+use Drupal\Core\Render\RendererInterface;
 use Drupal\file\FileInterface;
-use Drupal\media\MediaInterface;
 use Drupal\node\NodeInterface;
 
 /**
- * Extracts image data from node entity fields.
+ * Extracts image data from rendered node HTML.
  *
- * Scans a node for image fields (field type 'image') and entity
- * reference fields pointing to media entities with image source fields.
- * Returns an array of image metadata suitable for platform publishing.
+ * Renders the node using the "content_publishing" view mode and parses
+ * <img> tags from the HTML output. This captures images from any source —
+ * direct image fields, media fields, paragraphs, layout builder, etc.
+ *
+ * When possible, images are resolved back to Drupal file entities to
+ * provide file IDs and URIs. Images from external sources are included
+ * with URL-only metadata.
  */
 final class NodeImageExtractor {
+
+  /**
+   * The view mode used to render nodes for image extraction.
+   */
+  protected const VIEW_MODE = 'content_publishing';
+
+  /**
+   * Fallback view mode.
+   */
+  protected const FALLBACK_VIEW_MODE = 'default';
 
   /**
    * Constructs a NodeImageExtractor.
@@ -25,14 +39,11 @@ final class NodeImageExtractor {
   public function __construct(
     protected EntityTypeManagerInterface $entityTypeManager,
     protected FileUrlGeneratorInterface $fileUrlGenerator,
+    protected RendererInterface $renderer,
   ) {}
 
   /**
-   * Extracts all images from a node.
-   *
-   * Scans the node's fields for:
-   * - Direct image fields (field type 'image').
-   * - Entity reference fields pointing to media entities of type 'image'.
+   * Extracts all images from a node's rendered HTML output.
    *
    * @param \Drupal\node\NodeInterface $node
    *   The node to extract images from.
@@ -41,27 +52,33 @@ final class NodeImageExtractor {
    *
    * @return array
    *   Array of image data arrays, each containing:
-   *   - 'fid': (int) The file entity ID.
-   *   - 'uri': (string) The file URI (e.g., 'public://image.jpg').
-   *   - 'url': (string) The absolute URL to the file.
+   *   - 'fid': (int) The file entity ID, or 0 if not resolvable.
+   *   - 'uri': (string) The file URI, or empty if external.
+   *   - 'url': (string) The absolute URL to the image.
    *   - 'alt': (string) The alt text.
-   *   - 'title': (string) The title attribute (if available).
-   *   - 'filename': (string) The original filename.
-   *   - 'source_field': (string) The node field name the image came from.
+   *   - 'title': (string) The title attribute.
+   *   - 'filename': (string) The filename.
+   *   - 'width': (int) The width in pixels, or 0 if unknown.
+   *   - 'height': (int) The height in pixels, or 0 if unknown.
    */
   public function extractImages(NodeInterface $node, int $limit = 0): array {
-    $images = [];
-
-    foreach ($node->getFieldDefinitions() as $fieldName => $definition) {
-      $fieldType = $definition->getType();
-
-      if ($fieldType === 'image') {
-        $images = array_merge($images, $this->extractFromImageField($node, $fieldName));
-      }
-      elseif ($fieldType === 'entity_reference' && $definition->getSetting('target_type') === 'media') {
-        $images = array_merge($images, $this->extractFromMediaField($node, $fieldName));
-      }
+    $html = $this->renderNode($node);
+    if (trim($html) === '') {
+      return [];
     }
+
+    $images = $this->extractImagesFromHtml($html);
+
+    // Deduplicate by URL.
+    $seen = [];
+    $images = array_filter($images, function (array $image) use (&$seen) {
+      if (isset($seen[$image['url']])) {
+        return FALSE;
+      }
+      $seen[$image['url']] = TRUE;
+      return TRUE;
+    });
+    $images = array_values($images);
 
     if ($limit > 0 && count($images) > $limit) {
       $images = array_slice($images, 0, $limit);
@@ -71,38 +88,97 @@ final class NodeImageExtractor {
   }
 
   /**
-   * Extracts images from an image field.
+   * Renders the node using the content_publishing view mode.
    *
    * @param \Drupal\node\NodeInterface $node
    *   The node.
-   * @param string $fieldName
-   *   The image field name.
+   *
+   * @return string
+   *   The rendered HTML.
+   */
+  protected function renderNode(NodeInterface $node): string {
+    $viewMode = $this->resolveViewMode($node);
+    $viewBuilder = $this->entityTypeManager->getViewBuilder('node');
+    $renderArray = $viewBuilder->view($node, $viewMode);
+
+    return (string) $this->renderer->renderInIsolation($renderArray);
+  }
+
+  /**
+   * Determines which view mode to use.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The node.
+   *
+   * @return string
+   *   The view mode to use.
+   */
+  protected function resolveViewMode(NodeInterface $node): string {
+    $bundle = $node->bundle();
+    $viewDisplay = $this->entityTypeManager
+      ->getStorage('entity_view_display')
+      ->load('node.' . $bundle . '.' . static::VIEW_MODE);
+
+    if ($viewDisplay && $viewDisplay->status()) {
+      return static::VIEW_MODE;
+    }
+
+    return static::FALLBACK_VIEW_MODE;
+  }
+
+  /**
+   * Parses <img> tags from HTML and extracts image metadata.
+   *
+   * Attempts to resolve each image URL back to a Drupal file entity.
+   *
+   * @param string $html
+   *   The rendered HTML.
    *
    * @return array
    *   Array of image data arrays.
    */
-  protected function extractFromImageField(NodeInterface $node, string $fieldName): array {
+  protected function extractImagesFromHtml(string $html): array {
     $images = [];
 
-    if ($node->get($fieldName)->isEmpty()) {
-      return $images;
-    }
+    $dom = new \DOMDocument();
+    // Suppress warnings from malformed HTML.
+    @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
 
-    foreach ($node->get($fieldName) as $item) {
-      /** @var \Drupal\file\FileInterface|null $file */
-      $file = $item->entity;
-      if (!$file instanceof FileInterface) {
+    $imgTags = $dom->getElementsByTagName('img');
+
+    foreach ($imgTags as $img) {
+      $src = $img->getAttribute('src');
+      if (empty($src)) {
         continue;
       }
 
+      // Skip tiny images (likely icons, spacers, tracking pixels).
+      $width = (int) $img->getAttribute('width');
+      $height = (int) $img->getAttribute('height');
+      if (($width > 0 && $width < 50) || ($height > 0 && $height < 50)) {
+        continue;
+      }
+
+      // Skip data URIs and SVGs.
+      if (str_starts_with($src, 'data:') || str_ends_with(strtolower($src), '.svg')) {
+        continue;
+      }
+
+      $alt = $img->getAttribute('alt') ?: '';
+      $title = $img->getAttribute('title') ?: '';
+
+      // Try to resolve the URL to a Drupal file entity.
+      $fileData = $this->resolveFileFromUrl($src);
+
       $images[] = [
-        'fid' => (int) $file->id(),
-        'uri' => $file->getFileUri(),
-        'url' => $this->fileUrlGenerator->generateAbsoluteString($file->getFileUri()),
-        'alt' => $item->alt ?? '',
-        'title' => $item->title ?? '',
-        'filename' => $file->getFilename(),
-        'source_field' => $fieldName,
+        'fid' => $fileData['fid'] ?? 0,
+        'uri' => $fileData['uri'] ?? '',
+        'url' => $fileData['url'] ?? $src,
+        'alt' => $alt,
+        'title' => $title,
+        'filename' => $fileData['filename'] ?? basename(parse_url($src, PHP_URL_PATH) ?: 'image'),
+        'width' => $width,
+        'height' => $height,
       ];
     }
 
@@ -110,66 +186,46 @@ final class NodeImageExtractor {
   }
 
   /**
-   * Extracts images from a media entity reference field.
+   * Attempts to resolve an image URL to a Drupal file entity.
    *
-   * @param \Drupal\node\NodeInterface $node
-   *   The node.
-   * @param string $fieldName
-   *   The entity reference field name.
+   * Looks for files whose URI generates a URL matching the given src.
+   *
+   * @param string $src
+   *   The image src attribute from the HTML.
    *
    * @return array
-   *   Array of image data arrays.
+   *   File data with 'fid', 'uri', 'url', 'filename' keys, or empty if
+   *   the file could not be resolved.
    */
-  protected function extractFromMediaField(NodeInterface $node, string $fieldName): array {
-    $images = [];
+  protected function resolveFileFromUrl(string $src): array {
+    // Extract the path portion and try to match against known file schemes.
+    // Drupal file URLs typically contain /sites/default/files/ or /files/.
+    if (preg_match('#/files/(.+?)(?:\?|$)#', $src, $matches)) {
+      $relativePath = urldecode($matches[1]);
 
-    if ($node->get($fieldName)->isEmpty()) {
-      return $images;
-    }
-
-    foreach ($node->get($fieldName) as $item) {
-      /** @var \Drupal\media\MediaInterface|null $media */
-      $media = $item->entity;
-      if (!$media instanceof MediaInterface) {
-        continue;
+      // Handle image styles: /files/styles/STYLE/public/PATH
+      if (preg_match('#^styles/[^/]+/public/(.+)$#', $relativePath, $styleMatches)) {
+        $relativePath = $styleMatches[1];
       }
 
-      // Only process image-type media.
-      $sourceFieldName = $media->getSource()->getConfiguration()['source_field'] ?? '';
-      if (empty($sourceFieldName) || !$media->hasField($sourceFieldName)) {
-        continue;
-      }
+      $uri = 'public://' . $relativePath;
 
-      $sourceField = $media->get($sourceFieldName);
-      if ($sourceField->isEmpty()) {
-        continue;
-      }
+      $fileStorage = $this->entityTypeManager->getStorage('file');
+      $files = $fileStorage->loadByProperties(['uri' => $uri]);
 
-      $sourceFieldType = $sourceField->getFieldDefinition()->getType();
-      if ($sourceFieldType !== 'image') {
-        continue;
-      }
-
-      foreach ($sourceField as $imageItem) {
-        /** @var \Drupal\file\FileInterface|null $file */
-        $file = $imageItem->entity;
-        if (!$file instanceof FileInterface) {
-          continue;
-        }
-
-        $images[] = [
+      if (!empty($files)) {
+        /** @var \Drupal\file\FileInterface $file */
+        $file = reset($files);
+        return [
           'fid' => (int) $file->id(),
           'uri' => $file->getFileUri(),
           'url' => $this->fileUrlGenerator->generateAbsoluteString($file->getFileUri()),
-          'alt' => $imageItem->alt ?? '',
-          'title' => $imageItem->title ?? '',
           'filename' => $file->getFilename(),
-          'source_field' => $fieldName,
         ];
       }
     }
 
-    return $images;
+    return [];
   }
 
 }
