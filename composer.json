@@ -1,0 +1,24 @@
+{
+    "name": "iqual/iq_content_publishing",
+    "type": "drupal-module",
+    "description": "Platform-agnostic framework for publishing Drupal content to external platforms (social networks, newsletters, etc.) using AI-powered content transformation.",
+    "keywords": [
+        "Drupal",
+        "publishing",
+        "social media",
+        "AI",
+        "content transformation"
+    ],
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://www.drupal.org/project/iq_content_publishing",
+    "minimum-stability": "dev",
+    "support": {
+        "issues": "https://www.drupal.org/project/issues/iq_content_publishing",
+        "source": "https://git.drupalcode.org/project/iq_content_publishing"
+    },
+    "require": {
+        "php": ">=8.3",
+        "drupal/core": "^11",
+        "drupal/ai": "^1"
+    }
+}
