@@ -9,7 +9,7 @@ services:
       - '@plugin.manager.content_publishing_platform'
       - '@entity_type.manager'
       - '@iq_content_publishing.ai_transformer'
-      - '@iq_content_publishing.image_extractor'
+      - '@iq_content_publishing.content_extractor'
       - '@queue'
       - '@logger.factory'
       - '@current_user'
@@ -27,10 +27,4 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@renderer'
-
-  iq_content_publishing.image_extractor:
-    class: Drupal\iq_content_publishing\Service\NodeImageExtractor
-    arguments:
-      - '@entity_type.manager'
       - '@file_url_generator'
-      - '@renderer'

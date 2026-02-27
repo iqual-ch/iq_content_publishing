@@ -34,7 +34,7 @@ final class ContentPublishingManager {
     protected ContentPublishingPlatformManager $pluginManager,
     protected EntityTypeManagerInterface $entityTypeManager,
     protected AiContentTransformer $aiTransformer,
-    protected NodeImageExtractor $imageExtractor,
+    protected NodeContentExtractor $contentExtractor,
     protected QueueFactory $queueFactory,
     \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerFactory,
     protected AccountProxyInterface $currentUser,
@@ -153,7 +153,7 @@ final class ContentPublishingManager {
       switch ($fieldDef['type'] ?? '') {
         case 'image':
           $maxImages = $fieldDef['max'] ?? 0;
-          $fields[$fieldName] = $this->imageExtractor->extractImages($node, $maxImages);
+          $fields[$fieldName] = $this->contentExtractor->extractImages($node, $maxImages);
           break;
 
         case 'url':

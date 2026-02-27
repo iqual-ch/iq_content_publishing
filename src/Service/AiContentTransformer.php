@@ -250,18 +250,11 @@ final class AiContentTransformer {
     $cleanedResponse = $this->cleanJsonResponse($response);
     $decoded = json_decode($cleanedResponse, TRUE);
     if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-      $this->logger->debug('Parsed via cleanJsonResponse.');
+      $this->logger->debug('Parsed AI response as JSON.');
       return $this->mapDecodedFields($decoded, $aiFields);
     }
 
-    // Strategy 2: Try the raw trimmed response directly.
-    $decoded = json_decode(trim($response), TRUE);
-    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-      $this->logger->debug('Parsed raw response as JSON.');
-      return $this->mapDecodedFields($decoded, $aiFields);
-    }
-
-    // Strategy 3: Extract fields using regex from the raw response.
+    // Strategy 2: Extract fields using regex from the raw response.
     $regexFields = $this->extractFieldsViaRegex($response, $aiFields);
     if (!empty($regexFields)) {
       $this->logger->notice('Recovered fields via regex extraction from malformed response.');
@@ -320,8 +313,10 @@ final class AiContentTransformer {
       // Also handle the value spanning multiple lines.
       $pattern = '/"' . preg_quote($fieldName, '/') . '"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/s';
       if (preg_match($pattern, $response, $matches)) {
-        // Unescape JSON string escapes.
-        $fields[$fieldName] = stripcslashes($matches[1]);
+        // Properly unescape JSON string escapes by wrapping in quotes and
+        // decoding as a JSON string. This handles \n, \t, \", \\, \uXXXX, etc.
+        $unescaped = json_decode('"' . $matches[1] . '"');
+        $fields[$fieldName] = is_string($unescaped) ? $unescaped : $matches[1];
       }
     }
 
