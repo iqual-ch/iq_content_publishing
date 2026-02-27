@@ -3,21 +3,26 @@
  * Styles for the content publishing review form.
  */
 
-.iq-cp-image-selector {
+/* Layout the radio/checkbox items in a horizontal row. */
+.iq-cp-image-selector .form-radios,
+.iq-cp-image-selector .form-checkboxes {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
   align-items: flex-start;
 }
 
-.iq-cp-image-selector .form-type-radio,
-.iq-cp-image-selector .form-type-checkbox {
+/* Each radio/checkbox item as an inline block. */
+.iq-cp-image-selector .form-type--radio,
+.iq-cp-image-selector .form-type--checkbox {
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
+  gap: 4px;
 }
 
+/* Constrain image previews. */
 .iq-cp-image-selector img {
   max-width: 220px;
   max-height: 220px;
-  vertical-align: top;
+  display: block;
 }
