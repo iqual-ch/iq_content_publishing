@@ -251,10 +251,26 @@ final class PublishingReviewForm extends FormBase {
                   continue;
                 }
                 $optionKey = (string) ($imageData['fid'] ?? $idx);
-                $imgTag = '<img src="' . htmlspecialchars($imageData['url'], ENT_QUOTES) . '" '
-                  . 'alt="' . htmlspecialchars($imageData['alt'] ?? '', ENT_QUOTES) . '" '
-                  . 'style="max-width:120px;max-height:120px;vertical-align:middle;margin-right:8px;">';
-                $imageOptions[$optionKey] = $imgTag . htmlspecialchars($imageData['filename'] ?? 'Image', ENT_QUOTES);
+                $filename = htmlspecialchars($imageData['filename'] ?? 'Image', ENT_QUOTES);
+                $alt = htmlspecialchars($imageData['alt'] ?? '', ENT_QUOTES);
+
+                // Use the thumbnail image style if the file has a Drupal URI.
+                $thumbnailUrl = $imageData['url'];
+                if (!empty($imageData['uri'])) {
+                  /** @var \Drupal\image\ImageStyleInterface|null $imageStyle */
+                  $imageStyle = $this->entityTypeManager->getStorage('image_style')->load('thumbnail');
+                  if ($imageStyle) {
+                    $thumbnailUrl = $imageStyle->buildUrl($imageData['uri']);
+                  }
+                }
+
+                $imgTag = '<div style="display:inline-block;text-align:center;margin:4px 8px 4px 0;vertical-align:top;">'
+                  . '<img src="' . htmlspecialchars($thumbnailUrl, ENT_QUOTES) . '" '
+                  . 'alt="' . $alt . '" '
+                  . 'style="max-width:100px;max-height:100px;display:block;margin-bottom:4px;">'
+                  . '<small>' . $filename . '</small>'
+                  . '</div>';
+                $imageOptions[$optionKey] = $imgTag;
                 $defaultImages[] = $optionKey;
               }
             }
