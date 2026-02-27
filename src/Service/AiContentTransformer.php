@@ -247,10 +247,22 @@ final class AiContentTransformer {
     $decoded = json_decode($cleanedResponse, TRUE);
 
     if (json_last_error() !== JSON_ERROR_NONE) {
+      // Try to repair common JSON issues (missing quotes, trailing commas).
+      $repaired = $this->repairJson($cleanedResponse);
+      $decoded = json_decode($repaired, TRUE);
+    }
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+      // Last resort: extract fields using regex from the raw response.
+      $regexFields = $this->extractFieldsViaRegex($response, $aiFields);
+      if (!empty($regexFields)) {
+        $this->logger->notice('AI returned malformed JSON, recovered fields via regex extraction.');
+        return $regexFields;
+      }
+
       $this->logger->warning('AI returned non-JSON response, falling back to text field. Response: @response', [
         '@response' => mb_substr($response, 0, 500),
       ]);
-      // Fallback: put the whole response in the first text field.
       $firstField = array_key_first($aiFields);
       return [$firstField => trim($response)];
     }
@@ -262,6 +274,60 @@ final class AiContentTransformer {
     }
 
     return $fields;
+  }
+
+  /**
+   * Attempts to repair common JSON formatting issues from AI responses.
+   *
+   * @param string $json
+   *   The malformed JSON string.
+   *
+   * @return string
+   *   The repaired JSON string.
+   */
+  protected function repairJson(string $json): string {
+    // Remove trailing commas before closing braces/brackets.
+    $json = preg_replace('/,\s*([\]}])/s', '$1', $json);
+
+    // Fix unquoted string values: "key": value" → "key": "value"
+    // Matches a key followed by a colon, optional whitespace, then a
+    // non-quoted value that runs until a quote+comma or quote+closing brace.
+    $json = preg_replace('/"(\w+)":\s*(?!")(.+?)(",|\n|$)/m', '"$1": "$2$3', $json);
+
+    return $json;
+  }
+
+  /**
+   * Extracts field values from a response using regex as a last resort.
+   *
+   * Handles cases where the AI returns near-JSON but with formatting
+   * issues that prevent proper JSON parsing. Looks for "key": "value"
+   * patterns for each expected field.
+   *
+   * @param string $response
+   *   The raw AI response.
+   * @param array $aiFields
+   *   The expected AI-generated fields from the output schema.
+   *
+   * @return array
+   *   Extracted fields, or empty array if extraction fails.
+   */
+  protected function extractFieldsViaRegex(string $response, array $aiFields): array {
+    $fields = [];
+    $fieldNames = array_keys($aiFields);
+
+    foreach ($fieldNames as $fieldName) {
+      // Match "fieldName": "value" or "fieldName": "value with \"escapes\""
+      // Also handle the value spanning multiple lines.
+      $pattern = '/"' . preg_quote($fieldName, '/') . '"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/s';
+      if (preg_match($pattern, $response, $matches)) {
+        // Unescape JSON string escapes.
+        $fields[$fieldName] = stripcslashes($matches[1]);
+      }
+    }
+
+    // Only consider it a success if we extracted at least one field.
+    return !empty($fields) ? $fields : [];
   }
 
   /**
@@ -281,7 +347,7 @@ final class AiContentTransformer {
     $response = trim($response);
 
     // 1. Extract content from markdown code fences (```json ... ``` or ``` ... ```).
-    if (preg_match('/```(?:json)?\s*\n(.*?)\n\s*```/s', $response, $matches)) {
+    if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $response, $matches)) {
       return trim($matches[1]);
     }
 
