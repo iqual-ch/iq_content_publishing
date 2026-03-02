@@ -241,6 +241,21 @@ final class PublishingReviewForm extends FormBase {
             ];
             break;
 
+          case 'text_format':
+          case 'html_text':
+            $form['platforms'][$platformId]['fields'][$fieldName] = [
+              '#type' => 'text_format',
+              '#title' => $fieldLabel,
+              '#default_value' => is_string($fieldValue) ? $fieldValue : '',
+              '#format' => $fieldDef['format'] ?? 'basic_html',
+              '#rows' => $fieldDef['rows'] ?? 6,
+              '#description' => $fieldDef['description'] ?? '',
+            ];
+            if (!empty($fieldDef['allowed_formats'])) {
+              $form['platforms'][$platformId]['fields'][$fieldName]['#allowed_formats'] = $fieldDef['allowed_formats'];
+            }
+            break;
+
           case 'image':
             // Image fields show available images from the node with checkboxes/radios.
             $maxImages = $fieldDef['max'] ?? 0;
@@ -511,6 +526,18 @@ final class PublishingReviewForm extends FormBase {
             // Checkboxes return an array.
             $selected = array_filter((array) $selectedValue);
             $fields[$fieldName] = $this->resolveSelectedImages(array_keys($selected), $availableImages);
+          }
+          break;
+
+        case 'text_format':
+        case 'html_text':
+          // text_format fields submit as ['value' => ..., 'format' => ...].
+          $rawValue = $submittedFields[$fieldName] ?? '';
+          if (is_array($rawValue)) {
+            $fields[$fieldName] = $rawValue['value'] ?? '';
+          }
+          else {
+            $fields[$fieldName] = $rawValue;
           }
           break;
 
