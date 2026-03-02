@@ -141,7 +141,9 @@ final class PublishingSelectionForm extends FormBase {
       '#type' => 'link',
       '#title' => $this->t('Cancel'),
       '#url' => Url::fromRoute('entity.node.canonical', ['node' => $node->id()]),
-      '#attributes' => ['class' => ['button']],
+      '#attributes' => [
+        'class' => ['button', 'button--danger'],
+      ],
     ];
 
     return $form;

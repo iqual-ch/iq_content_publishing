@@ -57,18 +57,28 @@ function iq_content_publishing_form_alter(array &$form, FormStateInterface $form
     return;
   }
 
-  // Add the "Publish externally" action button as a plain link.
+  // Add the "Publish externally" action button as a submit button.
+  // This saves the node first, ensuring the AI generates content
+  // from the latest version.
   $form['actions']['publish_externally'] = [
-    '#type' => 'link',
-    '#title' => t('Publish externally'),
-    '#url' => Url::fromRoute('iq_content_publishing.select_platforms', [
-      'node' => $entity->id(),
-    ]),
+    '#type' => 'submit',
+    '#value' => t('Publish externally'),
+    '#weight' => 50,
+    '#submit' => ['::submitForm', '::save', '_iq_content_publishing_redirect_to_selection'],
     '#attributes' => [
       'class' => ['button', 'button--secondary'],
     ],
-    '#weight' => 50,
   ];
+}
+
+/**
+ * Submit handler that redirects to the platform selection form.
+ */
+function _iq_content_publishing_redirect_to_selection(array &$form, FormStateInterface $form_state): void {
+  $entity = $form_state->getFormObject()->getEntity();
+  $form_state->setRedirectUrl(Url::fromRoute('iq_content_publishing.select_platforms', [
+    'node' => $entity->id(),
+  ]));
 }
 
 /**
