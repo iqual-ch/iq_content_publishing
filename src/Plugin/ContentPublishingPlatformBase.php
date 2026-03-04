@@ -96,6 +96,6 @@ abstract class ContentPublishingPlatformBase extends PluginBase implements Conte
   /**
    * {@inheritdoc}
    */
-  abstract public function publish(NodeInterface $node, array $fields, array $credentials, array $settings): PublishingResult;
+  abstract public function publish(NodeInterface $node, array $fields, array $credentials, array $settings, string|int|null $toolId = NULL): PublishingResult;
 
 }

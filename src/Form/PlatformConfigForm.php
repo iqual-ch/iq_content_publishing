@@ -10,6 +10,7 @@ use Drupal\ai\AiProviderPluginManager;
 use Drupal\ai\Service\AiProviderFormHelper;
 use Drupal\iq_content_publishing\Entity\PublishingPlatformConfig;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
+use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -220,7 +221,14 @@ final class PlatformConfigForm extends EntityForm {
     // Plugin-specific settings (dynamic, inside the AJAX wrapper).
     if ($pluginId && $this->pluginManager->hasDefinition($pluginId)) {
       try {
+        /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
         $plugin = $this->pluginManager->createInstance($pluginId);
+
+        // Multi-tool support: show tool selection and per-tool AI
+        // instructions when the plugin implements MultiToolPlatformInterface.
+        if ($plugin instanceof MultiToolPlatformInterface) {
+          $form['plugin_dependent']['tools'] = $this->buildToolsSection($plugin, $entity, $form_state, $isPluginChange);
+        }
 
         $credentials_form = $plugin->buildCredentialsForm([], $entity->getCredentials());
         if (!empty($credentials_form)) {
@@ -250,6 +258,98 @@ final class PlatformConfigForm extends EntityForm {
     }
 
     return $form;
+  }
+
+  /**
+   * Builds the tools configuration section for multi-tool platforms.
+   *
+   * @param \Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface $plugin
+   *   The multi-tool platform plugin instance.
+   * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $entity
+   *   The platform config entity.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The current form state.
+   * @param bool $isPluginChange
+   *   Whether this render is triggered by a plugin_id AJAX change.
+   *
+   * @return array
+   *   The form render array for the tools section.
+   */
+  protected function buildToolsSection(MultiToolPlatformInterface $plugin, $entity, FormStateInterface $form_state, bool $isPluginChange): array {
+    $availableTools = $plugin->getAvailableTools();
+
+    if (empty($availableTools)) {
+      return [];
+    }
+
+    $pluginSettings = $entity->getPluginSettings();
+    $toolsConfig = $pluginSettings['tools'] ?? [];
+
+    $section = [
+      '#type' => 'details',
+      '#title' => $this->t('Content Tools'),
+      '#open' => TRUE,
+      '#tree' => TRUE,
+      '#description' => $this->t('This platform supports multiple content types/tools. Select which tools to enable and configure per-tool AI instructions.'),
+    ];
+
+    // Build enabled tools checkboxes.
+    $toolOptions = [];
+    foreach ($availableTools as $tool) {
+      $toolId = (string) $tool['id'];
+      $label = $tool['name'];
+      if (!empty($tool['description'])) {
+        $label .= ' — ' . $tool['description'];
+      }
+      $toolOptions[$toolId] = $label;
+    }
+
+    $enabledTools = array_keys($toolsConfig);
+    // On AJAX plugin change for new entities, default to none selected.
+    if ($isPluginChange && $entity->isNew()) {
+      $enabledTools = [];
+    }
+
+    $section['enabled'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Enabled tools'),
+      '#options' => $toolOptions,
+      '#default_value' => $enabledTools,
+      '#description' => $this->t('Select which content types/tools this platform should publish to. Each enabled tool gets its own AI instructions.'),
+    ];
+
+    // Per-tool AI instructions (shown for all available tools).
+    $section['instructions'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Per-tool AI Instructions'),
+      '#open' => TRUE,
+      '#description' => $this->t('Override the default AI prompt instructions per tool. Leave empty to use the plugin default for that tool.'),
+    ];
+
+    foreach ($availableTools as $tool) {
+      $toolId = (string) $tool['id'];
+      $defaultInstructions = $plugin->getDefaultAiInstructionsForTool($toolId);
+      $savedInstructions = $toolsConfig[$toolId]['ai_instructions'] ?? '';
+
+      // On AJAX plugin change for new entities, force defaults.
+      if ($isPluginChange && $entity->isNew()) {
+        $input = $form_state->getUserInput();
+        $input['tools']['instructions'][$toolId] = $defaultInstructions;
+        $form_state->setUserInput($input);
+      }
+
+      $section['instructions'][$toolId] = [
+        '#type' => 'textarea',
+        '#title' => $tool['name'],
+        '#default_value' => $savedInstructions ?: $defaultInstructions,
+        '#rows' => 6,
+        '#description' => $this->t('AI instructions for the %tool tool. Leave empty to use the plugin default.', [
+          '%tool' => $tool['name'],
+        ]),
+      ];
+    }
+
+    return $section;
   }
 
   /**
@@ -305,9 +405,27 @@ final class PlatformConfigForm extends EntityForm {
     if ($form_state->getValue('credentials')) {
       $entity->set('credentials', $form_state->getValue('credentials'));
     }
-    if ($form_state->getValue('plugin_settings')) {
-      $entity->set('plugin_settings', $form_state->getValue('plugin_settings'));
+
+    // Build plugin_settings from the form values.
+    $pluginSettings = $form_state->getValue('plugin_settings') ?? $entity->getPluginSettings();
+
+    // Merge tools configuration into plugin_settings when present.
+    $toolsValues = $form_state->getValue('tools');
+    if ($toolsValues) {
+      $enabledTools = array_filter($toolsValues['enabled'] ?? []);
+      $toolInstructions = $toolsValues['instructions'] ?? [];
+
+      $toolsConfig = [];
+      foreach ($enabledTools as $toolId) {
+        $toolsConfig[(string) $toolId] = [
+          'ai_instructions' => $toolInstructions[(string) $toolId] ?? '',
+        ];
+      }
+
+      $pluginSettings['tools'] = $toolsConfig;
     }
+
+    $entity->set('plugin_settings', $pluginSettings);
 
     $status = $entity->save();
 

@@ -64,6 +64,7 @@ final class ContentPublishingQueueWorker extends QueueWorkerBase implements Cont
     $nid = $data['nid'] ?? NULL;
     $platformId = $data['platform_id'] ?? NULL;
     $fields = $data['fields'] ?? [];
+    $toolId = $data['tool_id'] ?? NULL;
 
     if (!$nid || !$platformId) {
       $this->logger->error('Invalid queue item: missing nid or platform_id.');
@@ -84,7 +85,7 @@ final class ContentPublishingQueueWorker extends QueueWorkerBase implements Cont
 
     // If no pre-generated fields, generate them now.
     if (empty($fields)) {
-      $aiResult = $this->publishingManager->generateContent($node, $platform);
+      $aiResult = $this->publishingManager->generateContent($node, $platform, $toolId);
       if (!$aiResult->success) {
         $this->logger->error('AI generation failed for queued item (node @nid, platform @platform): @error', [
           '@nid' => $nid,
@@ -97,7 +98,7 @@ final class ContentPublishingQueueWorker extends QueueWorkerBase implements Cont
     }
 
     // Publish synchronously (bypasses the queue check in publishSync).
-    $this->publishingManager->publishSync($node, $platform, $fields);
+    $this->publishingManager->publishSync($node, $platform, $fields, $toolId);
   }
 
 }

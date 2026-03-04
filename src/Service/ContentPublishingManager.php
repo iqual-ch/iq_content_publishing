@@ -9,6 +9,7 @@ use Drupal\Core\Queue\QueueFactory;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
+use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
 use Drupal\iq_content_publishing\Plugin\PublishingResult;
 use Drupal\node\NodeInterface;
 use Psr\Log\LoggerInterface;
@@ -70,21 +71,51 @@ final class ContentPublishingManager {
    *   The node.
    * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $platform
    *   The platform config entity.
+   * @param string|int|null $toolId
+   *   The tool identifier for multi-tool platforms, or NULL for
+   *   single-tool platforms. When provided, tool-specific AI instructions
+   *   and output schema are used.
    *
    * @return \Drupal\iq_content_publishing\Service\AiTransformResult
    *   The AI transformation result with all fields populated.
    */
-  public function generateContent(NodeInterface $node, PublishingPlatformConfigInterface $platform): AiTransformResult {
-    $instructions = $platform->getAiInstructions();
+  public function generateContent(NodeInterface $node, PublishingPlatformConfigInterface $platform, string|int|null $toolId = NULL): AiTransformResult {
     $outputSchema = [];
 
     try {
+      /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
       $plugin = $this->pluginManager->createInstance($platform->getPluginId());
-      $outputSchema = $plugin->getOutputSchema();
 
-      // Fall back to plugin default instructions if none configured.
+      // Determine output schema — tool-specific or platform default.
+      if ($toolId !== NULL && $plugin instanceof MultiToolPlatformInterface) {
+        $toolSchema = $plugin->getOutputSchemaForTool($toolId);
+        $outputSchema = !empty($toolSchema) ? $toolSchema : $plugin->getOutputSchema();
+      }
+      else {
+        $outputSchema = $plugin->getOutputSchema();
+      }
+
+      // Determine AI instructions — per-tool config > platform config > plugin default.
+      $instructions = '';
+      if ($toolId !== NULL) {
+        // Check for per-tool instructions stored in plugin_settings.
+        $pluginSettings = $platform->getPluginSettings();
+        $instructions = $pluginSettings['tools'][$toolId]['ai_instructions'] ?? '';
+      }
+
+      // Fall back to platform-level instructions.
       if (empty($instructions)) {
-        $instructions = $plugin->getDefaultAiInstructions();
+        $instructions = $platform->getAiInstructions();
+      }
+
+      // Fall back to plugin default (tool-specific or generic).
+      if (empty($instructions)) {
+        if ($toolId !== NULL && $plugin instanceof MultiToolPlatformInterface) {
+          $instructions = $plugin->getDefaultAiInstructionsForTool($toolId);
+        }
+        else {
+          $instructions = $plugin->getDefaultAiInstructions();
+        }
       }
     }
     catch (\Exception $e) {
@@ -186,17 +217,19 @@ final class ContentPublishingManager {
    *   The platform config entity.
    * @param array $fields
    *   Structured content fields keyed by output schema field names.
+   * @param string|int|null $toolId
+   *   The tool identifier for multi-tool platforms, or NULL.
    *
    * @return \Drupal\iq_content_publishing\Plugin\PublishingResult|null
    *   The publishing result for sync mode, NULL for async (queued).
    */
-  public function publish(NodeInterface $node, PublishingPlatformConfigInterface $platform, array $fields): ?PublishingResult {
+  public function publish(NodeInterface $node, PublishingPlatformConfigInterface $platform, array $fields, string|int|null $toolId = NULL): ?PublishingResult {
     if ($platform->getProcessingMode() === 'async') {
-      $this->queueForProcessing($node, $platform, $fields);
+      $this->queueForProcessing($node, $platform, $fields, $toolId);
       return NULL;
     }
 
-    return $this->publishSync($node, $platform, $fields);
+    return $this->publishSync($node, $platform, $fields, $toolId);
   }
 
   /**
@@ -208,11 +241,13 @@ final class ContentPublishingManager {
    *   The platform config entity.
    * @param array $fields
    *   Structured content fields.
+   * @param string|int|null $toolId
+   *   The tool identifier for multi-tool platforms, or NULL.
    *
    * @return \Drupal\iq_content_publishing\Plugin\PublishingResult
    *   The publishing result.
    */
-  public function publishSync(NodeInterface $node, PublishingPlatformConfigInterface $platform, array $fields): PublishingResult {
+  public function publishSync(NodeInterface $node, PublishingPlatformConfigInterface $platform, array $fields, string|int|null $toolId = NULL): PublishingResult {
     try {
       $plugin = $this->pluginManager->createInstance($platform->getPluginId());
       $result = $plugin->publish(
@@ -220,6 +255,7 @@ final class ContentPublishingManager {
         $fields,
         $platform->getCredentials(),
         $platform->getPluginSettings(),
+        $toolId,
       );
     }
     catch (\Exception $e) {
@@ -246,14 +282,17 @@ final class ContentPublishingManager {
    *   The platform config entity.
    * @param array $fields
    *   Structured content fields.
+   * @param string|int|null $toolId
+   *   The tool identifier for multi-tool platforms, or NULL.
    */
-  protected function queueForProcessing(NodeInterface $node, PublishingPlatformConfigInterface $platform, array $fields): void {
+  protected function queueForProcessing(NodeInterface $node, PublishingPlatformConfigInterface $platform, array $fields, string|int|null $toolId = NULL): void {
     $queue = $this->queueFactory->get('iq_content_publishing');
     $queue->createItem([
       'nid' => $node->id(),
       'platform_id' => $platform->id(),
       'fields' => $fields,
       'uid' => $this->currentUser->id(),
+      'tool_id' => $toolId,
     ]);
 
     $this->logger->info('Queued publishing to @platform for node @nid.', [

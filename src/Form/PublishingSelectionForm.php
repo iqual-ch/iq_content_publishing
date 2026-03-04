@@ -11,6 +11,8 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Link;
 use Drupal\Core\Url;
+use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
+use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
 use Drupal\iq_content_publishing\Service\ContentPublishingManager;
 use Drupal\node\NodeInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -26,6 +28,7 @@ final class PublishingSelectionForm extends FormBase {
 
   public function __construct(
     protected ContentPublishingManager $publishingManager,
+    protected ContentPublishingPlatformManager $pluginManager,
     protected EntityTypeManagerInterface $entityTypeManager,
     protected DateFormatterInterface $dateFormatter,
     protected PrivateTempStoreFactory $tempStoreFactory,
@@ -37,6 +40,7 @@ final class PublishingSelectionForm extends FormBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get('iq_content_publishing.manager'),
+      $container->get('plugin.manager.content_publishing_platform'),
       $container->get('entity_type.manager'),
       $container->get('date.formatter'),
       $container->get('tempstore.private'),
@@ -195,35 +199,47 @@ final class PublishingSelectionForm extends FormBase {
     $logLink = Link::fromTextAndUrl($this->t('View publishing log'), Url::fromRoute('iq_content_publishing.node_log', ['node' => $nid]))->toString();
 
     foreach ($fireAndForgetPlatforms as $platform) {
-      $aiResult = $this->publishingManager->generateContent($node, $platform);
-      if ($aiResult->success) {
-        $publishResult = $this->publishingManager->publish($node, $platform, $aiResult->fields);
-        if ($publishResult === NULL) {
-          $this->messenger()->addStatus($this->t('@platform: queued for processing. @log_link', [
-            '@platform' => $platform->label(),
-            '@log_link' => $logLink,
-          ]));
-        }
-        elseif ($publishResult->success) {
-          $this->messenger()->addStatus($this->t('@platform: published successfully. @log_link', [
-            '@platform' => $platform->label(),
-            '@log_link' => $logLink,
-          ]));
+      // Determine if this is a multi-tool platform with enabled tools.
+      $toolIds = $this->getEnabledToolIds($platform);
+
+      if (empty($toolIds)) {
+        // Single-tool platform — behave as before.
+        $toolIds = [NULL];
+      }
+
+      foreach ($toolIds as $toolId) {
+        $toolLabel = $toolId !== NULL ? $platform->label() . ' (' . $toolId . ')' : $platform->label();
+
+        $aiResult = $this->publishingManager->generateContent($node, $platform, $toolId);
+        if ($aiResult->success) {
+          $publishResult = $this->publishingManager->publish($node, $platform, $aiResult->fields, $toolId);
+          if ($publishResult === NULL) {
+            $this->messenger()->addStatus($this->t('@platform: queued for processing. @log_link', [
+              '@platform' => $toolLabel,
+              '@log_link' => $logLink,
+            ]));
+          }
+          elseif ($publishResult->success) {
+            $this->messenger()->addStatus($this->t('@platform: published successfully. @log_link', [
+              '@platform' => $toolLabel,
+              '@log_link' => $logLink,
+            ]));
+          }
+          else {
+            $this->messenger()->addError($this->t('@platform: failed — @message. @log_link', [
+              '@platform' => $toolLabel,
+              '@message' => $publishResult->message,
+              '@log_link' => $logLink,
+            ]));
+          }
         }
         else {
-          $this->messenger()->addError($this->t('@platform: failed — @message. @log_link', [
-            '@platform' => $platform->label(),
-            '@message' => $publishResult->message,
+          $this->messenger()->addError($this->t('@platform: AI generation failed — @error. @log_link', [
+            '@platform' => $toolLabel,
+            '@error' => $aiResult->error,
             '@log_link' => $logLink,
           ]));
         }
-      }
-      else {
-        $this->messenger()->addError($this->t('@platform: AI generation failed — @error. @log_link', [
-          '@platform' => $platform->label(),
-          '@error' => $aiResult->error,
-          '@log_link' => $logLink,
-        ]));
       }
     }
 
@@ -242,6 +258,37 @@ final class PublishingSelectionForm extends FormBase {
         'node' => $nid,
       ]));
     }
+  }
+
+  /**
+   * Gets the enabled tool IDs for a multi-tool platform.
+   *
+   * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $platform
+   *   The platform config entity.
+   *
+   * @return array
+   *   Array of tool ID strings, or empty array if not a multi-tool platform
+   *   or no tools are enabled.
+   */
+  protected function getEnabledToolIds($platform): array {
+    try {
+      $plugin = $this->pluginManager->createInstance($platform->getPluginId());
+      if (!$plugin instanceof MultiToolPlatformInterface) {
+        return [];
+      }
+    }
+    catch (\Exception) {
+      return [];
+    }
+
+    $pluginSettings = $platform->getPluginSettings();
+    $toolsConfig = $pluginSettings['tools'] ?? [];
+
+    if (empty($toolsConfig)) {
+      return [];
+    }
+
+    return array_keys($toolsConfig);
   }
 
   /**

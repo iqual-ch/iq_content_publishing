@@ -12,6 +12,7 @@ use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Link;
 use Drupal\Core\Url;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
+use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
 use Drupal\iq_content_publishing\Service\ContentPublishingManager;
 use Drupal\node\NodeInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -120,41 +121,65 @@ final class PublishingReviewForm extends FormBase {
         continue;
       }
 
-      // Get the output schema from the plugin.
-      $outputSchema = [];
-      try {
-        $plugin = $this->pluginManager->createInstance($platform->getPluginId());
-        $outputSchema = $plugin->getOutputSchema();
+      // Determine tool IDs for this platform (multi-tool support).
+      $toolIds = $this->getEnabledToolIds($platform);
+      if (empty($toolIds)) {
+        // Single-tool platform — use NULL as the tool ID.
+        $toolIds = [NULL];
       }
-      catch (\Exception) {
-        // Fall back to default single text field.
-        $outputSchema = [
-          'text' => [
-            'type' => 'textarea',
-            'label' => $this->t('Post text'),
-            'required' => TRUE,
-            'ai_generated' => TRUE,
-          ],
+
+      foreach ($toolIds as $toolId) {
+        // Build a composite key for form structure and generated content.
+        $entryKey = $toolId !== NULL ? $platformId . '--' . $toolId : $platformId;
+        $entryLabel = $platform->label();
+        if ($toolId !== NULL) {
+          $entryLabel .= ' — ' . $this->getToolLabel($platform, $toolId);
+        }
+
+        // Get the output schema from the plugin (tool-specific or default).
+        $outputSchema = [];
+        try {
+          /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
+          $plugin = $this->pluginManager->createInstance($platform->getPluginId());
+          if ($toolId !== NULL && $plugin instanceof MultiToolPlatformInterface) {
+            $toolSchema = $plugin->getOutputSchemaForTool($toolId);
+            $outputSchema = !empty($toolSchema) ? $toolSchema : $plugin->getOutputSchema();
+          }
+          else {
+            $outputSchema = $plugin->getOutputSchema();
+          }
+        }
+        catch (\Exception) {
+          // Fall back to default single text field.
+          $outputSchema = [
+            'text' => [
+              'type' => 'textarea',
+              'label' => $this->t('Post text'),
+              'required' => TRUE,
+              'ai_generated' => TRUE,
+            ],
+          ];
+        }
+
+        // Generate content if not already cached in form state.
+        if (!isset($generatedContents[$entryKey])) {
+          $aiResult = $this->publishingManager->generateContent($node, $platform, $toolId);
+          $generatedContents[$entryKey] = [
+            'fields' => $aiResult->success ? $aiResult->fields : [],
+            'error' => $aiResult->error,
+            'prompt' => $aiResult->prompt,
+            'platform_id' => $platformId,
+            'tool_id' => $toolId,
+          ];
+        }
+
+        $form_state->set('generated_contents', $generatedContents);
+
+        $form['platforms'][$entryKey] = [
+          '#type' => 'details',
+          '#title' => $entryLabel,
+          '#open' => TRUE,
         ];
-      }
-
-      // Generate content if not already cached in form state.
-      if (!isset($generatedContents[$platformId])) {
-        $aiResult = $this->publishingManager->generateContent($node, $platform);
-        $generatedContents[$platformId] = [
-          'fields' => $aiResult->success ? $aiResult->fields : [],
-          'error' => $aiResult->error,
-          'prompt' => $aiResult->prompt,
-        ];
-      }
-
-      $form_state->set('generated_contents', $generatedContents);
-
-      $form['platforms'][$platformId] = [
-        '#type' => 'details',
-        '#title' => $platform->label(),
-        '#open' => TRUE,
-      ];
 
       // Check for previous publish and show re-submit warnings.
       $lastLog = $this->getLastLog($logStorage, $node, $platformId);
@@ -163,10 +188,10 @@ final class PublishingReviewForm extends FormBase {
         $resubmitBehavior = $platform->getResubmitBehavior();
 
         if ($resubmitBehavior === 'warn' || $resubmitBehavior === 'block') {
-          $form['platforms'][$platformId]['resubmit_warning'] = [
+          $form['platforms'][$entryKey]['resubmit_warning'] = [
             '#markup' => '<div class="messages messages--warning"><strong>' .
               $this->t('This content was already published to @platform on @date. Publishing again will create a new post on the external platform.', [
-                '@platform' => $platform->label(),
+                '@platform' => $entryLabel,
                 '@date' => $dateStr,
               ]) . '</strong></div>',
             '#weight' => -10,
@@ -174,10 +199,10 @@ final class PublishingReviewForm extends FormBase {
         }
 
         if ($resubmitBehavior === 'block') {
-          $form['platforms'][$platformId]['confirm_resubmit'] = [
+          $form['platforms'][$entryKey]['confirm_resubmit'] = [
             '#type' => 'checkbox',
             '#title' => $this->t('I understand this will create a duplicate post on @platform and want to proceed.', [
-              '@platform' => $platform->label(),
+              '@platform' => $entryLabel,
             ]),
             '#default_value' => FALSE,
             '#weight' => -5,
@@ -185,21 +210,21 @@ final class PublishingReviewForm extends FormBase {
         }
       }
 
-      if (!empty($generatedContents[$platformId]['error'])) {
-        $form['platforms'][$platformId]['error'] = [
+      if (!empty($generatedContents[$entryKey]['error'])) {
+        $form['platforms'][$entryKey]['error'] = [
           '#markup' => '<p class="messages messages--error">' . $this->t('AI generation failed: @error', [
-            '@error' => $generatedContents[$platformId]['error'],
+            '@error' => $generatedContents[$entryKey]['error'],
           ]) . '</p>',
         ];
       }
 
       // Build per-field widgets based on the output schema.
-      $form['platforms'][$platformId]['fields'] = [
+      $form['platforms'][$entryKey]['fields'] = [
         '#type' => 'container',
         '#tree' => TRUE,
       ];
 
-      $currentFields = $generatedContents[$platformId]['fields'] ?? [];
+      $currentFields = $generatedContents[$entryKey]['fields'] ?? [];
 
       foreach ($outputSchema as $fieldName => $fieldDef) {
         $fieldType = $fieldDef['type'] ?? 'textfield';
@@ -208,7 +233,7 @@ final class PublishingReviewForm extends FormBase {
 
         switch ($fieldType) {
           case 'textarea':
-            $form['platforms'][$platformId]['fields'][$fieldName] = [
+            $form['platforms'][$entryKey]['fields'][$fieldName] = [
               '#type' => 'textarea',
               '#title' => $fieldLabel,
               '#default_value' => is_string($fieldValue) ? $fieldValue : '',
@@ -216,14 +241,14 @@ final class PublishingReviewForm extends FormBase {
               '#description' => $fieldDef['description'] ?? '',
             ];
             if (!empty($fieldDef['max_length'])) {
-              $form['platforms'][$platformId]['fields'][$fieldName]['#attributes']['maxlength'] = $fieldDef['max_length'];
-              $form['platforms'][$platformId]['fields'][$fieldName]['#description'] .=
+              $form['platforms'][$entryKey]['fields'][$fieldName]['#attributes']['maxlength'] = $fieldDef['max_length'];
+              $form['platforms'][$entryKey]['fields'][$fieldName]['#description'] .=
                 ' ' . $this->t('(max @count characters)', ['@count' => $fieldDef['max_length']]);
             }
             break;
 
           case 'textfield':
-            $form['platforms'][$platformId]['fields'][$fieldName] = [
+            $form['platforms'][$entryKey]['fields'][$fieldName] = [
               '#type' => 'textfield',
               '#title' => $fieldLabel,
               '#default_value' => is_string($fieldValue) ? $fieldValue : '',
@@ -233,7 +258,7 @@ final class PublishingReviewForm extends FormBase {
             break;
 
           case 'url':
-            $form['platforms'][$platformId]['fields'][$fieldName] = [
+            $form['platforms'][$entryKey]['fields'][$fieldName] = [
               '#type' => 'url',
               '#title' => $fieldLabel,
               '#default_value' => is_string($fieldValue) ? $fieldValue : '',
@@ -243,7 +268,7 @@ final class PublishingReviewForm extends FormBase {
 
           case 'text_format':
           case 'html_text':
-            $form['platforms'][$platformId]['fields'][$fieldName] = [
+            $form['platforms'][$entryKey]['fields'][$fieldName] = [
               '#type' => 'text_format',
               '#title' => $fieldLabel,
               '#default_value' => is_string($fieldValue) ? $fieldValue : '',
@@ -252,7 +277,7 @@ final class PublishingReviewForm extends FormBase {
               '#description' => $fieldDef['description'] ?? '',
             ];
             if (!empty($fieldDef['allowed_formats'])) {
-              $form['platforms'][$platformId]['fields'][$fieldName]['#allowed_formats'] = $fieldDef['allowed_formats'];
+              $form['platforms'][$entryKey]['fields'][$fieldName]['#allowed_formats'] = $fieldDef['allowed_formats'];
             }
             break;
 
@@ -286,7 +311,7 @@ final class PublishingReviewForm extends FormBase {
 
               if ($maxImages === 1) {
                 // Single image: radios.
-                $form['platforms'][$platformId]['fields'][$fieldName] = [
+                $form['platforms'][$entryKey]['fields'][$fieldName] = [
                   '#type' => 'radios',
                   '#title' => $fieldLabel,
                   '#options' => $imageOptions + ['_none' => $this->t('No image')],
@@ -298,7 +323,7 @@ final class PublishingReviewForm extends FormBase {
               }
               else {
                 // Multiple images: checkboxes.
-                $form['platforms'][$platformId]['fields'][$fieldName] = [
+                $form['platforms'][$entryKey]['fields'][$fieldName] = [
                   '#type' => 'checkboxes',
                   '#title' => $fieldLabel,
                   '#options' => $imageOptions,
@@ -310,7 +335,7 @@ final class PublishingReviewForm extends FormBase {
               }
             }
             else {
-              $form['platforms'][$platformId]['fields'][$fieldName] = [
+              $form['platforms'][$entryKey]['fields'][$fieldName] = [
                 '#type' => 'item',
                 '#title' => $fieldLabel,
                 '#markup' => '<em>' . $this->t('No images available from this content.') . '</em>',
@@ -320,11 +345,12 @@ final class PublishingReviewForm extends FormBase {
         }
       }
 
-      $form['platforms'][$platformId]['enabled'] = [
+      $form['platforms'][$entryKey]['enabled'] = [
         '#type' => 'checkbox',
-        '#title' => $this->t('Publish to @platform', ['@platform' => $platform->label()]),
+        '#title' => $this->t('Publish to @platform', ['@platform' => $entryLabel]),
         '#default_value' => !empty($currentFields),
       ];
+      } // End foreach toolIds.
     }
 
     $form['platform_ids'] = [
@@ -366,14 +392,19 @@ final class PublishingReviewForm extends FormBase {
     parent::validateForm($form, $form_state);
 
     // Validate that 'block' platforms have confirmation checked.
-    $platformIds = explode(',', $form_state->getValue('platform_ids') ?? '');
     $platforms = $form_state->getValue('platforms', []);
     $platformStorage = $this->entityTypeManager->getStorage('publishing_platform');
 
-    foreach ($platformIds as $platformId) {
-      if (empty($platforms[$platformId]['enabled'])) {
+    foreach ($platforms as $entryKey => $entryValues) {
+      if (empty($entryValues['enabled'])) {
         continue;
       }
+
+      // Extract platform ID from composite key (platformId--toolId).
+      $platformId = str_contains((string) $entryKey, '--')
+        ? strstr((string) $entryKey, '--', TRUE)
+        : (string) $entryKey;
+
       /** @var \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface|null $platform */
       $platform = $platformStorage->load($platformId);
       if (!$platform) {
@@ -382,10 +413,10 @@ final class PublishingReviewForm extends FormBase {
       // If platform has 'block' behavior and this is a re-submission,
       // require the confirmation checkbox.
       if ($platform->getResubmitBehavior() === 'block'
-          && isset($platforms[$platformId]['confirm_resubmit'])
-          && empty($platforms[$platformId]['confirm_resubmit'])) {
+          && isset($entryValues['confirm_resubmit'])
+          && empty($entryValues['confirm_resubmit'])) {
         $form_state->setErrorByName(
-          "platforms][$platformId][confirm_resubmit",
+          "platforms][$entryKey][confirm_resubmit",
           $this->t('@platform: You must confirm re-submission to proceed.', [
             '@platform' => $platform->label(),
           ]),
@@ -413,9 +444,21 @@ final class PublishingReviewForm extends FormBase {
     $generatedContents = $form_state->get('generated_contents') ?? [];
     $logLink = Link::fromTextAndUrl($this->t('View publishing log'), Url::fromRoute('iq_content_publishing.node_log', ['node' => $nid]))->toString();
 
-    foreach ($platformIds as $platformId) {
-      if (empty($platforms[$platformId]['enabled'])) {
+    // Iterate all form entries (which can be platformId or platformId--toolId).
+    foreach ($platforms as $entryKey => $entryValues) {
+      if (empty($entryValues['enabled'])) {
         continue;
+      }
+
+      // Parse composite key to extract platformId and toolId.
+      $entryKeyStr = (string) $entryKey;
+      if (str_contains($entryKeyStr, '--')) {
+        $platformId = strstr($entryKeyStr, '--', TRUE);
+        $toolId = substr(strstr($entryKeyStr, '--'), 2);
+      }
+      else {
+        $platformId = $entryKeyStr;
+        $toolId = NULL;
       }
 
       /** @var \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface|null $platform */
@@ -424,15 +467,27 @@ final class PublishingReviewForm extends FormBase {
         continue;
       }
 
+      $entryLabel = $platform->label();
+      if ($toolId !== NULL) {
+        $entryLabel .= ' — ' . $this->getToolLabel($platform, $toolId);
+      }
+
       // Collect structured fields from the form submission.
-      $submittedFields = $platforms[$platformId]['fields'] ?? [];
-      $generatedFields = $generatedContents[$platformId]['fields'] ?? [];
+      $submittedFields = $entryValues['fields'] ?? [];
+      $generatedFields = $generatedContents[$entryKeyStr]['fields'] ?? [];
 
       // Get the output schema to properly process each field type.
       $outputSchema = [];
       try {
+        /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
         $plugin = $this->pluginManager->createInstance($platform->getPluginId());
-        $outputSchema = $plugin->getOutputSchema();
+        if ($toolId !== NULL && $plugin instanceof MultiToolPlatformInterface) {
+          $toolSchema = $plugin->getOutputSchemaForTool($toolId);
+          $outputSchema = !empty($toolSchema) ? $toolSchema : $plugin->getOutputSchema();
+        }
+        else {
+          $outputSchema = $plugin->getOutputSchema();
+        }
       }
       catch (\Exception) {
         // Continue with raw submitted fields.
@@ -451,28 +506,28 @@ final class PublishingReviewForm extends FormBase {
 
       if (!$hasContent) {
         $this->messenger()->addWarning($this->t('@platform: skipped (no content).', [
-          '@platform' => $platform->label(),
+          '@platform' => $entryLabel,
         ]));
         continue;
       }
 
-      $publishResult = $this->publishingManager->publish($node, $platform, $fields);
+      $publishResult = $this->publishingManager->publish($node, $platform, $fields, $toolId);
 
       if ($publishResult === NULL) {
         $this->messenger()->addStatus($this->t('@platform: queued for processing. @log_link', [
-          '@platform' => $platform->label(),
+          '@platform' => $entryLabel,
           '@log_link' => $logLink,
         ]));
       }
       elseif ($publishResult->success) {
         $this->messenger()->addStatus($this->t('@platform: published successfully. @log_link', [
-          '@platform' => $platform->label(),
+          '@platform' => $entryLabel,
           '@log_link' => $logLink,
         ]));
       }
       else {
         $this->messenger()->addError($this->t('@platform: failed — @message. @log_link', [
-          '@platform' => $platform->label(),
+          '@platform' => $entryLabel,
           '@message' => $publishResult->message,
           '@log_link' => $logLink,
         ]));
@@ -581,6 +636,59 @@ final class PublishingReviewForm extends FormBase {
   public function regenerateSubmit(array &$form, FormStateInterface $form_state): void {
     $form_state->set('generated_contents', NULL);
     $form_state->setRebuild(TRUE);
+  }
+
+  /**
+   * Gets the enabled tool IDs for a multi-tool platform.
+   *
+   * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $platform
+   *   The platform config entity.
+   *
+   * @return array
+   *   Array of tool ID strings, or empty array if not multi-tool.
+   */
+  protected function getEnabledToolIds($platform): array {
+    try {
+      $plugin = $this->pluginManager->createInstance($platform->getPluginId());
+      if (!$plugin instanceof MultiToolPlatformInterface) {
+        return [];
+      }
+    }
+    catch (\Exception) {
+      return [];
+    }
+
+    $pluginSettings = $platform->getPluginSettings();
+    $toolsConfig = $pluginSettings['tools'] ?? [];
+
+    return !empty($toolsConfig) ? array_keys($toolsConfig) : [];
+  }
+
+  /**
+   * Gets the human-readable label for a tool.
+   *
+   * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $platform
+   *   The platform config entity.
+   * @param string|int $toolId
+   *   The tool identifier.
+   *
+   * @return string
+   *   The tool label, or the tool ID as fallback.
+   */
+  protected function getToolLabel($platform, string|int $toolId): string {
+    try {
+      $plugin = $this->pluginManager->createInstance($platform->getPluginId());
+      if ($plugin instanceof MultiToolPlatformInterface) {
+        $tools = $plugin->getAvailableTools();
+        if (isset($tools[(string) $toolId])) {
+          return $tools[(string) $toolId]['name'];
+        }
+      }
+    }
+    catch (\Exception) {
+      // Fall through.
+    }
+    return (string) $toolId;
   }
 
   /**

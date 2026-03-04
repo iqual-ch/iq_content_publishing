@@ -182,7 +182,7 @@ INSTRUCTIONS;
   /**
    * {@inheritdoc}
    */
-  public function publish(NodeInterface $node, array $fields, array $credentials, array $settings): PublishingResult {
+  public function publish(NodeInterface $node, array $fields, array $credentials, array $settings, string|int|null $toolId = NULL): PublishingResult {
     $timestamp = time();
     $postId = ($settings['simulated_external_id'] ?? 'mock-post') . '-' . mt_rand(100000, 999999);
     $platformUrl = rtrim($settings['simulated_platform_url'] ?? 'https://mock-social.example.com/posts/', '/');

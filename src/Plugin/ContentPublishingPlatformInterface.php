@@ -115,10 +115,15 @@ interface ContentPublishingPlatformInterface extends PluginInspectionInterface, 
    *   The platform credentials.
    * @param array $settings
    *   The platform-specific settings.
+   * @param string|int|null $toolId
+   *   The tool/content type identifier for multi-tool platforms.
+   *   NULL for single-tool platforms. Platforms implementing
+   *   MultiToolPlatformInterface receive this to route content to
+   *   the correct tool.
    *
    * @return \Drupal\iq_content_publishing\Plugin\PublishingResult
    *   The result of the publishing operation.
    */
-  public function publish(NodeInterface $node, array $fields, array $credentials, array $settings): PublishingResult;
+  public function publish(NodeInterface $node, array $fields, array $credentials, array $settings, string|int|null $toolId = NULL): PublishingResult;
 
 }
