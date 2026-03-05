@@ -11,11 +11,12 @@ use Drupal\node\NodeInterface;
 use League\HTMLToMarkdown\HtmlConverter;
 
 /**
- * Extracts node content as Markdown and images from rendered HTML.
+ * Extracts node content as Markdown, images, and videos from rendered HTML.
  *
  * Renders the node once using the "content_publishing" view mode, then:
  * - Converts the HTML to clean Markdown for the AI prompt.
  * - Parses <img> tags for image selection in the review form.
+ * - Parses <video> and <iframe> tags for video extraction.
  *
  * This unified approach handles any content architecture (paragraphs,
  * layout builder, media, etc.) without field-by-field enumeration,
@@ -118,6 +119,48 @@ final class NodeContentExtractor {
     }));
 
     return $images;
+  }
+
+  /**
+   * Extracts all videos from the node's rendered HTML.
+   *
+   * Parses <video> tags (including <source> children) and <iframe> embeds
+   * (YouTube, Vimeo) from the rendered node output.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The node to extract videos from.
+   *
+   * @return array
+   *   Array of video data arrays, each containing:
+   *   - 'id': (string) A unique identifier for the video (hash of the URL).
+   *   - 'uri': (string) The file URI, or empty if external/embed.
+   *   - 'url': (string) The absolute URL to the video.
+   *   - 'source': (string) One of 'local', 'youtube', 'vimeo', or 'embed'.
+   *   - 'mime': (string) The MIME type, or empty if unknown.
+   *   - 'filename': (string) The filename.
+   *   - 'thumbnail': (string) The thumbnail URL, if available.
+   *   - 'width': (int) The width in pixels, or 0 if unknown.
+   *   - 'height': (int) The height in pixels, or 0 if unknown.
+   */
+  public function extractVideos(NodeInterface $node): array {
+    $html = $this->getRenderedHtml($node);
+    if (trim($html) === '') {
+      return [];
+    }
+
+    $videos = $this->parseVideosFromHtml($html);
+
+    // Deduplicate by URL.
+    $seen = [];
+    $videos = array_values(array_filter($videos, function (array $video) use (&$seen) {
+      if (isset($seen[$video['url']])) {
+        return FALSE;
+      }
+      $seen[$video['url']] = TRUE;
+      return TRUE;
+    }));
+
+    return $videos;
   }
 
   /**
@@ -243,13 +286,134 @@ final class NodeContentExtractor {
   }
 
   /**
-   * Attempts to resolve an image URL to a Drupal file entity.
+   * Parses <video> and <iframe> tags from HTML and extracts video metadata.
    *
-   * @param string $src
-   *   The image src attribute from the HTML.
+   * @param string $html
+   *   The rendered HTML.
    *
    * @return array
-   *   File data array, or empty if not resolvable.
+   *   Array of video data arrays.
+   */
+  protected function parseVideosFromHtml(string $html): array {
+    $videos = [];
+
+    $dom = new \DOMDocument();
+    @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOERROR | LIBXML_NOWARNING);
+
+    // Parse <video> tags.
+    $videoTags = $dom->getElementsByTagName('video');
+    foreach ($videoTags as $video) {
+      $src = $video->getAttribute('src');
+      $mime = $video->getAttribute('type') ?: '';
+      $width = (int) $video->getAttribute('width');
+      $height = (int) $video->getAttribute('height');
+
+      // If no src on the <video> tag, look for <source> children.
+      if (empty($src)) {
+        $sources = $video->getElementsByTagName('source');
+        foreach ($sources as $source) {
+          $sourceSrc = $source->getAttribute('src');
+          if (!empty($sourceSrc)) {
+            $src = $sourceSrc;
+            $mime = $source->getAttribute('type') ?: $mime;
+            break;
+          }
+        }
+      }
+
+      if (empty($src)) {
+        continue;
+      }
+
+      $fileData = $this->resolveFileFromUrl($src);
+      $url = $fileData['url'] ?? $src;
+
+      $videos[] = [
+        'id' => substr(hash('sha256', $url), 0, 12),
+        'uri' => $fileData['uri'] ?? '',
+        'url' => $url,
+        'source' => 'local',
+        'mime' => $mime,
+        'filename' => $fileData['filename'] ?? basename(parse_url($src, PHP_URL_PATH) ?: 'video'),
+        'thumbnail' => $video->getAttribute('poster') ?: '',
+        'width' => $width,
+        'height' => $height,
+      ];
+    }
+
+    // Parse <iframe> tags for video embeds (YouTube, Vimeo, etc.).
+    $iframeTags = $dom->getElementsByTagName('iframe');
+    foreach ($iframeTags as $iframe) {
+      $src = $iframe->getAttribute('src');
+      if (empty($src)) {
+        continue;
+      }
+
+      $embedInfo = $this->resolveVideoEmbed($src);
+      if ($embedInfo === NULL) {
+        continue;
+      }
+
+      $width = (int) $iframe->getAttribute('width');
+      $height = (int) $iframe->getAttribute('height');
+
+      $videos[] = [
+        'id' => substr(hash('sha256', $embedInfo['url']), 0, 12),
+        'uri' => '',
+        'url' => $embedInfo['url'],
+        'source' => $embedInfo['source'],
+        'mime' => '',
+        'filename' => '',
+        'thumbnail' => $embedInfo['thumbnail'],
+        'width' => $width,
+        'height' => $height,
+      ];
+    }
+
+    return $videos;
+  }
+
+  /**
+   * Resolves an iframe src to a video embed with metadata.
+   *
+   * @param string $src
+   *   The iframe src URL.
+   *
+   * @return array|null
+   *   An array with 'url', 'source', and 'thumbnail' keys, or NULL if the
+   *   iframe is not a recognized video embed.
+   */
+  protected function resolveVideoEmbed(string $src): ?array {
+    // YouTube.
+    if (preg_match('#(?:youtube\.com/embed/|youtube-nocookie\.com/embed/)([\w-]+)#', $src, $m)) {
+      return [
+        'url' => 'https://www.youtube.com/watch?v=' . $m[1],
+        'source' => 'youtube',
+        'thumbnail' => 'https://img.youtube.com/vi/' . $m[1] . '/hqdefault.jpg',
+      ];
+    }
+
+    // Vimeo.
+    if (preg_match('#player\.vimeo\.com/video/(\d+)#', $src, $m)) {
+      return [
+        'url' => 'https://vimeo.com/' . $m[1],
+        'source' => 'vimeo',
+        'thumbnail' => '',
+      ];
+    }
+
+    return NULL;
+  }
+
+  /**
+   * Attempts to resolve a media URL to a Drupal file entity.
+   *
+   * @param string $src
+   *   The src attribute from the HTML element.
+   *
+   * @return array
+   *   File data array with 'uri', 'url', 'filename' keys, or empty if not
+   *   resolvable.
    */
   protected function resolveFileFromUrl(string $src): array {
     if (preg_match('#/files/(.+?)(?:\?|$)#', $src, $matches)) {

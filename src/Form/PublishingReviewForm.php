@@ -355,6 +355,80 @@ final class PublishingReviewForm extends FormBase {
               ];
             }
             break;
+
+          case 'video':
+            // Video fields show available videos from the node with checkboxes/radios.
+            $maxVideos = $fieldDef['max'] ?? 0;
+            $videoOptions = [];
+            $defaultVideos = [];
+
+            if (is_array($fieldValue)) {
+              foreach ($fieldValue as $idx => $videoData) {
+                if (!is_array($videoData) || empty($videoData['url'])) {
+                  continue;
+                }
+                $optionKey = $videoData['id'] ?? (string) $idx;
+                $sourceLabel = ucfirst($videoData['source'] ?? 'video');
+                $filename = htmlspecialchars($videoData['filename'] ?? '', ENT_QUOTES);
+                $videoUrl = htmlspecialchars($videoData['url'], ENT_QUOTES);
+
+                // Build a preview: thumbnail image if available, otherwise a text label.
+                $thumbnailUrl = $videoData['thumbnail'] ?? '';
+                if (!empty($thumbnailUrl)) {
+                  $preview = '<img src="' . htmlspecialchars($thumbnailUrl, ENT_QUOTES) . '" '
+                    . 'alt="' . $sourceLabel . '" style="max-width:200px;max-height:150px;">';
+                }
+                else {
+                  $preview = '<span class="iq-cp-video-icon">&#9654;</span>';
+                }
+
+                $label = $preview . '<br><small>' . $sourceLabel;
+                if (!empty($filename)) {
+                  $label .= ': ' . $filename;
+                }
+                $label .= '</small><br><small>' . $videoUrl . '</small>';
+                $videoOptions[$optionKey] = $label;
+                $defaultVideos[] = $optionKey;
+              }
+            }
+
+            if (!empty($videoOptions)) {
+              $wrapper_prefix = '<div class="iq-cp-video-selector">';
+              $wrapper_suffix = '</div>';
+
+              if ($maxVideos === 1) {
+                // Single video: radios.
+                $form['platforms'][$entryKey]['fields'][$fieldName] = [
+                  '#type' => 'radios',
+                  '#title' => $fieldLabel,
+                  '#options' => $videoOptions + ['_none' => $this->t('No video')],
+                  '#default_value' => !empty($defaultVideos) ? reset($defaultVideos) : '_none',
+                  '#description' => $fieldDef['description'] ?? '',
+                  '#prefix' => $wrapper_prefix,
+                  '#suffix' => $wrapper_suffix,
+                ];
+              }
+              else {
+                // Multiple videos: checkboxes.
+                $form['platforms'][$entryKey]['fields'][$fieldName] = [
+                  '#type' => 'checkboxes',
+                  '#title' => $fieldLabel,
+                  '#options' => $videoOptions,
+                  '#default_value' => $defaultVideos,
+                  '#description' => $fieldDef['description'] ?? '',
+                  '#prefix' => $wrapper_prefix,
+                  '#suffix' => $wrapper_suffix,
+                ];
+              }
+            }
+            else {
+              $form['platforms'][$entryKey]['fields'][$fieldName] = [
+                '#type' => 'item',
+                '#title' => $fieldLabel,
+                '#markup' => '<em>' . $this->t('No videos available from this content.') . '</em>',
+              ];
+            }
+            break;
         }
       }
 
@@ -556,13 +630,13 @@ final class PublishingReviewForm extends FormBase {
   /**
    * Collects structured fields from the form submission.
    *
-   * Merges user-edited text fields with programmatic fields (images).
-   * For image fields, resolves selected file IDs back to image data arrays.
+   * Merges user-edited text fields with programmatic fields (images, videos).
+   * For image/video fields, resolves selected IDs back to data arrays.
    *
    * @param array $submittedFields
    *   The raw form-submitted field values.
    * @param array $generatedFields
-   *   The original generated fields (for image data lookup).
+   *   The original generated fields (for image/video data lookup).
    * @param array $outputSchema
    *   The platform output schema.
    *
@@ -594,6 +668,27 @@ final class PublishingReviewForm extends FormBase {
             // Checkboxes return an array.
             $selected = array_filter((array) $selectedValue);
             $fields[$fieldName] = $this->resolveSelectedImages(array_keys($selected), $availableImages);
+          }
+          break;
+
+        case 'video':
+          // Resolve selected videos back to full video data.
+          $selectedValue = $submittedFields[$fieldName] ?? [];
+          $availableVideos = is_array($generatedFields[$fieldName] ?? NULL) ? $generatedFields[$fieldName] : [];
+
+          if (is_string($selectedValue)) {
+            // Radios return a single string value.
+            if ($selectedValue === '_none' || $selectedValue === '') {
+              $fields[$fieldName] = [];
+            }
+            else {
+              $fields[$fieldName] = $this->resolveSelectedVideos([$selectedValue], $availableVideos);
+            }
+          }
+          else {
+            // Checkboxes return an array.
+            $selected = array_filter((array) $selectedValue);
+            $fields[$fieldName] = $this->resolveSelectedVideos(array_keys($selected), $availableVideos);
           }
           break;
 
@@ -638,6 +733,31 @@ final class PublishingReviewForm extends FormBase {
       $id = $imageData['id'] ?? (string) $idx;
       if (in_array($id, $selectedIds, TRUE)) {
         $resolved[] = $imageData;
+      }
+    }
+    return $resolved;
+  }
+
+  /**
+   * Resolves selected video IDs back to full video data arrays.
+   *
+   * @param array $selectedIds
+   *   The selected video IDs (as strings).
+   * @param array $availableVideos
+   *   The available video data arrays from generation.
+   *
+   * @return array
+   *   Array of video data arrays for the selected videos.
+   */
+  protected function resolveSelectedVideos(array $selectedIds, array $availableVideos): array {
+    $resolved = [];
+    foreach ($availableVideos as $idx => $videoData) {
+      if (!is_array($videoData)) {
+        continue;
+      }
+      $id = $videoData['id'] ?? (string) $idx;
+      if (in_array($id, $selectedIds, TRUE)) {
+        $resolved[] = $videoData;
       }
     }
     return $resolved;

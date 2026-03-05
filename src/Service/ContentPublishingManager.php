@@ -185,6 +185,10 @@ final class ContentPublishingManager {
           $fields[$fieldName] = $this->contentExtractor->extractImages($node);
           break;
 
+        case 'video':
+          $fields[$fieldName] = $this->contentExtractor->extractVideos($node);
+          break;
+
         case 'url':
           try {
             $fields[$fieldName] = $node->toUrl('canonical', ['absolute' => TRUE])->toString();
