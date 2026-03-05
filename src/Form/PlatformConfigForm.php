@@ -318,12 +318,12 @@ final class PlatformConfigForm extends EntityForm {
       '#description' => $this->t('Select which content types/tools this platform should publish to. Each enabled tool gets its own AI instructions.'),
     ];
 
-    // Per-tool AI instructions (shown for all available tools).
+    // Per-tool AI instructions (only visible for selected/enabled tools).
     $section['instructions'] = [
       '#type' => 'details',
       '#title' => $this->t('Per-tool AI Instructions'),
       '#open' => TRUE,
-      '#description' => $this->t('Override the default AI prompt instructions per tool. Leave empty to use the plugin default for that tool.'),
+      '#description' => $this->t('Override the default AI prompt instructions per tool. Leave empty to use the plugin default for that tool. Only enabled tools are shown.'),
     ];
 
     foreach ($availableTools as $tool) {
@@ -346,6 +346,12 @@ final class PlatformConfigForm extends EntityForm {
         '#description' => $this->t('AI instructions for the %tool tool. Leave empty to use the plugin default.', [
           '%tool' => $tool['name'],
         ]),
+        // Only show AI instructions for tools that are enabled.
+        '#states' => [
+          'visible' => [
+            ':input[name="tools[enabled][' . $toolId . ']"]' => ['checked' => TRUE],
+          ],
+        ],
       ];
     }
 
