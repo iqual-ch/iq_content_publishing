@@ -240,6 +240,13 @@ final class PublishingReviewForm extends FormBase {
       $currentFields = $generatedContents[$entryKey]['fields'] ?? [];
 
       foreach ($outputSchema as $fieldName => $fieldDef) {
+        // If $fieldDef is already a form field definition, use it directly.
+        if (isset($fieldDef['#type'])) {
+          $form['platforms'][$entryKey]['fields'][$fieldName] = $fieldDef;
+          continue;
+        }
+
+        // Else build a form field based on the schema definition.
         $fieldType = $fieldDef['type'] ?? 'textfield';
         $fieldLabel = $fieldDef['label'] ?? $fieldName;
         $fieldValue = $currentFields[$fieldName] ?? '';
@@ -428,6 +435,16 @@ final class PublishingReviewForm extends FormBase {
                 '#markup' => '<em>' . $this->t('No videos available from this content.') . '</em>',
               ];
             }
+            break;
+
+          default:
+            // Unknown field type, do nothing or optionally log a warning.
+            $form['platforms'][$entryKey]['fields'][$fieldName] = [
+              '#type' => 'item',
+              '#title' => $fieldLabel,
+              '#markup' => '<em>' . $this->t('Unsupported field type: @type', ['@type' => $fieldType]) . '</em>',
+            ];
+
             break;
         }
       }
