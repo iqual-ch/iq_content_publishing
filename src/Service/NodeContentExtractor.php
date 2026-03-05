@@ -342,11 +342,23 @@ final class NodeContentExtractor {
     }
 
     // Parse <iframe> tags for video embeds (YouTube, Vimeo, etc.).
+    // Drupal renders oEmbed videos as iframes. Consent managers (e.g. Klaro)
+    // may move the real URL from src to data-src, so we check both.
     $iframeTags = $dom->getElementsByTagName('iframe');
     foreach ($iframeTags as $iframe) {
       $src = $iframe->getAttribute('src');
       if (empty($src)) {
+        $src = $iframe->getAttribute('data-src');
+      }
+      if (empty($src)) {
         continue;
+      }
+
+      // Drupal's oEmbed proxy: /media/oembed?url=ENCODED_URL&...
+      // Extract the original video URL from the query string.
+      $oembedUrl = $this->resolveOembedProxyUrl($src);
+      if ($oembedUrl !== NULL) {
+        $src = $oembedUrl;
       }
 
       $embedInfo = $this->resolveVideoEmbed($src);
@@ -357,20 +369,54 @@ final class NodeContentExtractor {
       $width = (int) $iframe->getAttribute('width');
       $height = (int) $iframe->getAttribute('height');
 
+      // Prefer data-thumbnail from Drupal's oEmbed rendering.
+      $thumbnail = $iframe->getAttribute('data-thumbnail') ?: $embedInfo['thumbnail'];
+
+      // Use title attribute if available.
+      $title = $iframe->getAttribute('title') ?: '';
+
       $videos[] = [
         'id' => substr(hash('sha256', $embedInfo['url']), 0, 12),
         'uri' => '',
         'url' => $embedInfo['url'],
         'source' => $embedInfo['source'],
         'mime' => '',
+        'title' => $title,
         'filename' => '',
-        'thumbnail' => $embedInfo['thumbnail'],
+        'thumbnail' => $thumbnail,
         'width' => $width,
         'height' => $height,
       ];
     }
 
     return $videos;
+  }
+
+  /**
+   * Extracts the original URL from a Drupal oEmbed proxy URL.
+   *
+   * Drupal renders remote video media as iframes pointing to
+   * /media/oembed?url=ENCODED_URL&... This method extracts the original
+   * video URL from the 'url' query parameter.
+   *
+   * @param string $src
+   *   The iframe src or data-src URL.
+   *
+   * @return string|null
+   *   The decoded original video URL, or NULL if not an oEmbed proxy URL.
+   */
+  protected function resolveOembedProxyUrl(string $src): ?string {
+    // Match Drupal's oEmbed proxy path: /media/oembed?url=...
+    if (str_contains($src, '/media/oembed')) {
+      $query = parse_url($src, PHP_URL_QUERY);
+      if ($query) {
+        parse_str($query, $params);
+        if (!empty($params['url'])) {
+          return $params['url'];
+        }
+      }
+    }
+    return NULL;
   }
 
   /**
@@ -384,8 +430,15 @@ final class NodeContentExtractor {
    *   iframe is not a recognized video embed.
    */
   protected function resolveVideoEmbed(string $src): ?array {
-    // YouTube.
-    if (preg_match('#(?:youtube\.com/embed/|youtube-nocookie\.com/embed/)([\w-]+)#', $src, $m)) {
+    // YouTube: embed URLs and direct watch/short URLs.
+    if (preg_match('#(?:youtube\.com/embed/|youtube-nocookie\.com/embed/|youtu\.be/)([\w-]+)#', $src, $m)) {
+      return [
+        'url' => 'https://www.youtube.com/watch?v=' . $m[1],
+        'source' => 'youtube',
+        'thumbnail' => 'https://img.youtube.com/vi/' . $m[1] . '/hqdefault.jpg',
+      ];
+    }
+    if (preg_match('#youtube\.com/watch\?v=([\w-]+)#', $src, $m)) {
       return [
         'url' => 'https://www.youtube.com/watch?v=' . $m[1],
         'source' => 'youtube',
@@ -393,8 +446,8 @@ final class NodeContentExtractor {
       ];
     }
 
-    // Vimeo.
-    if (preg_match('#player\.vimeo\.com/video/(\d+)#', $src, $m)) {
+    // Vimeo: embed and direct URLs.
+    if (preg_match('#(?:player\.)?vimeo\.com/(?:video/)?(\d+)#', $src, $m)) {
       return [
         'url' => 'https://vimeo.com/' . $m[1],
         'source' => 'vimeo',
