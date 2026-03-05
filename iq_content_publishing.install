@@ -30,3 +30,23 @@ function iq_content_publishing_uninstall(): void {
   \Drupal::queue('iq_content_publishing')->deleteQueue();
 
 }
+
+/**
+ * Add tool_id field to publishing_log entity.
+ */
+function iq_content_publishing_update_10001(): void {
+  $entity_type_manager = \Drupal::entityTypeManager();
+  $entity_definition_update_manager = \Drupal::entityDefinitionUpdateManager();
+
+  $field_storage_definition = \Drupal\Core\Field\BaseFieldDefinition::create('string')
+    ->setLabel(t('Tool ID'))
+    ->setDescription(t('The tool identifier for multi-tool platforms (e.g. social:4, content:2). NULL for single-tool platforms.'))
+    ->setSettings(['max_length' => 255]);
+
+  $entity_definition_update_manager->installFieldStorageDefinition(
+    'tool_id',
+    'publishing_log',
+    'iq_content_publishing',
+    $field_storage_definition,
+  );
+}

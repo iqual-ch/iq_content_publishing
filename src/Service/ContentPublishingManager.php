@@ -268,7 +268,7 @@ final class ContentPublishingManager {
     }
 
     // Log the result.
-    $this->createLogEntry($node, $platform, $fields, $result);
+    $this->createLogEntry($node, $platform, $fields, $result, '', $toolId);
 
     return $result;
   }
@@ -314,6 +314,8 @@ final class ContentPublishingManager {
    *   The publishing result.
    * @param string $prompt
    *   The AI prompt used (optional).
+   * @param string|int|null $toolId
+   *   The tool identifier for multi-tool platforms, or NULL.
    */
   public function createLogEntry(
     NodeInterface $node,
@@ -321,6 +323,7 @@ final class ContentPublishingManager {
     array $fields,
     PublishingResult $result,
     string $prompt = '',
+    string|int|null $toolId = NULL,
   ): void {
     try {
       $logStorage = $this->entityTypeManager->getStorage('publishing_log');
@@ -328,6 +331,7 @@ final class ContentPublishingManager {
         'nid' => $node->id(),
         'platform_id' => $platform->id(),
         'plugin_id' => $platform->getPluginId(),
+        'tool_id' => $toolId !== NULL ? (string) $toolId : NULL,
         'status_code' => $result->success ? 'success' : 'failure',
         'ai_output' => json_encode($fields, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         'ai_prompt' => $prompt,

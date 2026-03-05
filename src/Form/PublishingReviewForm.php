@@ -195,7 +195,7 @@ final class PublishingReviewForm extends FormBase {
         ];
 
       // Check for previous publish and show re-submit warnings.
-      $lastLog = $this->getLastLog($logStorage, $node, $platformId);
+      $lastLog = $this->getLastLog($logStorage, $node, $platformId, $toolId);
       if ($lastLog) {
         $dateStr = $this->dateFormatter->format((int) $lastLog->get('created')->value, 'short');
         $resubmitBehavior = $platform->getResubmitBehavior();
@@ -305,7 +305,7 @@ final class PublishingReviewForm extends FormBase {
                 if (!is_array($imageData) || empty($imageData['url'])) {
                   continue;
                 }
-                $optionKey = (string) ($imageData['fid'] ?? $idx);
+                $optionKey = $imageData['id'] ?? (string) $idx;
                 $alt = htmlspecialchars($imageData['alt'] ?? '', ENT_QUOTES);
 
                 // Use the medium image style for the preview.
@@ -635,8 +635,8 @@ final class PublishingReviewForm extends FormBase {
       if (!is_array($imageData)) {
         continue;
       }
-      $fid = (string) ($imageData['fid'] ?? $idx);
-      if (in_array($fid, $selectedIds, TRUE)) {
+      $id = $imageData['id'] ?? (string) $idx;
+      if (in_array($id, $selectedIds, TRUE)) {
         $resolved[] = $imageData;
       }
     }
@@ -713,19 +713,26 @@ final class PublishingReviewForm extends FormBase {
    *   The node.
    * @param string $platformId
    *   The platform config entity ID.
+   * @param string|int|null $toolId
+   *   The tool identifier for multi-tool platforms, or NULL.
    *
    * @return \Drupal\iq_content_publishing\Entity\PublishingLog|null
    *   The most recent log entry, or NULL if none found.
    */
-  protected function getLastLog($logStorage, NodeInterface $node, string $platformId) {
-    $ids = $logStorage->getQuery()
+  protected function getLastLog($logStorage, NodeInterface $node, string $platformId, string|int|null $toolId = NULL) {
+    $query = $logStorage->getQuery()
       ->accessCheck(FALSE)
       ->condition('nid', $node->id())
       ->condition('platform_id', $platformId)
       ->condition('status_code', 'success')
       ->sort('created', 'DESC')
-      ->range(0, 1)
-      ->execute();
+      ->range(0, 1);
+
+    if ($toolId !== NULL) {
+      $query->condition('tool_id', (string) $toolId);
+    }
+
+    $ids = $query->execute();
 
     return !empty($ids) ? $logStorage->load(reset($ids)) : NULL;
   }

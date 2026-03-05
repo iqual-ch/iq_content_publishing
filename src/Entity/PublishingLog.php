@@ -57,6 +57,11 @@ final class PublishingLog extends ContentEntityBase {
       ->setSettings(['max_length' => 255])
       ->setRequired(TRUE);
 
+    $fields['tool_id'] = BaseFieldDefinition::create('string')
+      ->setLabel(t('Tool ID'))
+      ->setDescription(t('The tool identifier for multi-tool platforms (e.g. social:4, content:2). NULL for single-tool platforms.'))
+      ->setSettings(['max_length' => 255]);
+
     $fields['status_code'] = BaseFieldDefinition::create('string')
       ->setLabel(t('Status'))
       ->setDescription(t('The publishing status: success or failure.'))

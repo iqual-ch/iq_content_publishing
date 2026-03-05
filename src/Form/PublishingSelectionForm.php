@@ -126,9 +126,9 @@ final class PublishingSelectionForm extends FormBase {
         $processing = $platform->getProcessingMode() === 'async' ? $this->t('queued') : $this->t('instant');
         $parts[] = '(' . $mode . ', ' . $processing . ')';
 
-        // Show previous publish info if exists.
-        if (!empty($publishHistory[$platformId])) {
-          $lastPublish = $publishHistory[$platformId];
+        // Show previous publish info if exists (keyed by composite key).
+        if (!empty($publishHistory[$entryKey])) {
+          $lastPublish = $publishHistory[$entryKey];
           $dateStr = $this->dateFormatter->format($lastPublish['created'], 'short');
           if ($lastPublish['status'] === 'success') {
             $badge = $this->t('⚠ Previously published: ✓ on @date', [
@@ -370,7 +370,11 @@ final class PublishingSelectionForm extends FormBase {
   }
 
   /**
-   * Gets the most recent successful publish for each platform for this node.
+   * Gets the most recent publish log for each tool entry for this node.
+   *
+   * For multi-tool platforms, each tool gets its own history entry keyed
+   * by composite key (platformId--toolId). For single-tool platforms,
+   * the key is just the platformId.
    *
    * @param \Drupal\node\NodeInterface $node
    *   The node.
@@ -378,31 +382,64 @@ final class PublishingSelectionForm extends FormBase {
    *   The available platforms.
    *
    * @return array
-   *   Keyed by platform_id, each value has 'created', 'status', 'external_id'.
+   *   Keyed by composite key (platformId--toolId or platformId),
+   *   each value has 'created', 'status', 'external_id', 'external_url'.
    */
   protected function getPublishHistory(NodeInterface $node, array $platforms): array {
     $history = [];
     $logStorage = $this->entityTypeManager->getStorage('publishing_log');
 
     foreach ($platforms as $platform) {
-      $query = $logStorage->getQuery()
-        ->accessCheck(FALSE)
-        ->condition('nid', $node->id())
-        ->condition('platform_id', $platform->id())
-        ->sort('created', 'DESC')
-        ->range(0, 1);
-      $ids = $query->execute();
+      $toolIds = $this->getEnabledToolIds($platform);
 
-      if (!empty($ids)) {
-        /** @var \Drupal\iq_content_publishing\Entity\PublishingLog|null $log */
-        $log = $logStorage->load(reset($ids));
-        if ($log) {
-          $history[$platform->id()] = [
-            'created' => (int) $log->get('created')->value,
-            'status' => $log->get('status_code')->value,
-            'external_id' => $log->get('external_id')->value ?? '',
-            'external_url' => $log->get('external_url')->value ?? '',
-          ];
+      if (!empty($toolIds)) {
+        // Multi-tool platform: query per tool_id.
+        foreach ($toolIds as $toolId) {
+          $query = $logStorage->getQuery()
+            ->accessCheck(FALSE)
+            ->condition('nid', $node->id())
+            ->condition('platform_id', $platform->id())
+            ->condition('tool_id', (string) $toolId)
+            ->sort('created', 'DESC')
+            ->range(0, 1);
+          $ids = $query->execute();
+
+          if (!empty($ids)) {
+            /** @var \Drupal\iq_content_publishing\Entity\PublishingLog|null $log */
+            $log = $logStorage->load(reset($ids));
+            if ($log) {
+              $compositeKey = $platform->id() . '--' . $toolId;
+              $history[$compositeKey] = [
+                'created' => (int) $log->get('created')->value,
+                'status' => $log->get('status_code')->value,
+                'external_id' => $log->get('external_id')->value ?? '',
+                'external_url' => $log->get('external_url')->value ?? '',
+              ];
+            }
+          }
+        }
+      }
+      else {
+        // Single-tool platform: query without tool_id.
+        $query = $logStorage->getQuery()
+          ->accessCheck(FALSE)
+          ->condition('nid', $node->id())
+          ->condition('platform_id', $platform->id())
+          ->sort('created', 'DESC')
+          ->range(0, 1);
+        $ids = $query->execute();
+
+        if (!empty($ids)) {
+          /** @var \Drupal\iq_content_publishing\Entity\PublishingLog|null $log */
+          $log = $logStorage->load(reset($ids));
+          if ($log) {
+            $history[$platform->id()] = [
+              'created' => (int) $log->get('created')->value,
+              'status' => $log->get('status_code')->value,
+              'external_id' => $log->get('external_id')->value ?? '',
+              'external_url' => $log->get('external_url')->value ?? '',
+            ];
+          }
         }
       }
     }
