@@ -91,44 +91,77 @@ final class PublishingSelectionForm extends FormBase {
       '#options' => [],
     ];
 
+    // Collect default selections: multi-tool entries are pre-selected.
+    $defaultPlatforms = [];
+
     foreach ($platforms as $platform) {
       $platformId = $platform->id();
       $label = $platform->label();
 
-      // Build description with publish history badge.
-      $parts = [];
-      $description = $platform->getDescription();
-      if ($description) {
-        $parts[] = $description;
-      }
-      $mode = $platform->isReviewMode() ? $this->t('review before sending') : $this->t('send immediately');
-      $processing = $platform->getProcessingMode() === 'async' ? $this->t('queued') : $this->t('instant');
-      $parts[] = '(' . $mode . ', ' . $processing . ')';
+      // Check if this is a multi-tool platform with enabled tools.
+      $toolIds = $this->getEnabledToolIds($platform);
 
-      // Show previous publish info if exists.
-      if (!empty($publishHistory[$platformId])) {
-        $lastPublish = $publishHistory[$platformId];
-        $dateStr = $this->dateFormatter->format($lastPublish['created'], 'short');
-        $statusEmoji = $lastPublish['status'] === 'success' ? '✓' : '✗';
-        $badge = $this->t('⚠ Previously published: @status on @date', [
-          '@status' => $statusEmoji,
-          '@date' => $dateStr,
-        ]);
-        $parts[] = '<br><strong>' . $badge . '</strong>';
-
-        $resubmitBehavior = $platform->getResubmitBehavior();
-        if ($resubmitBehavior === 'block') {
-          $parts[] = '<br><em>' . $this->t('Re-submission requires confirmation on the review page.') . '</em>';
-        }
-        elseif ($resubmitBehavior === 'warn') {
-          $parts[] = '<br><em>' . $this->t('Re-submitting will create a new post on this platform.') . '</em>';
+      // Build a list of "entries" — either one per tool or one for the whole
+      // platform (single-tool).
+      $entries = [];
+      if (!empty($toolIds)) {
+        foreach ($toolIds as $toolId) {
+          $compositeKey = $platformId . '--' . $toolId;
+          $toolLabel = $label . ' — ' . $this->getToolLabel($platform, $toolId);
+          $entries[$compositeKey] = $toolLabel;
+          $defaultPlatforms[] = $compositeKey;
         }
       }
+      else {
+        $entries[$platformId] = $label;
+      }
 
-      $form['platforms']['#options'][$platformId] = $label;
-      $form['platforms'][$platformId]['#description'] = [
-        '#markup' => implode(' ', $parts),
-      ];
+      foreach ($entries as $entryKey => $entryLabel) {
+        // Build description with publish history badge.
+        $parts = [];
+        $description = $platform->getDescription();
+        if ($description) {
+          $parts[] = $description;
+        }
+        $mode = $platform->isReviewMode() ? $this->t('review before sending') : $this->t('send immediately');
+        $processing = $platform->getProcessingMode() === 'async' ? $this->t('queued') : $this->t('instant');
+        $parts[] = '(' . $mode . ', ' . $processing . ')';
+
+        // Show previous publish info if exists.
+        if (!empty($publishHistory[$platformId])) {
+          $lastPublish = $publishHistory[$platformId];
+          $dateStr = $this->dateFormatter->format($lastPublish['created'], 'short');
+          if ($lastPublish['status'] === 'success') {
+            $badge = $this->t('⚠ Previously published: ✓ on @date', [
+              '@date' => $dateStr,
+            ]);
+          }
+          else {
+            $badge = $this->t('⚠ Previous submission failed: ✗ on @date', [
+              '@date' => $dateStr,
+            ]);
+          }
+          $parts[] = '<br><strong>' . $badge . '</strong>';
+
+          $resubmitBehavior = $platform->getResubmitBehavior();
+          if ($resubmitBehavior === 'block') {
+            $parts[] = '<br><em>' . $this->t('Re-submission requires confirmation on the review page.') . '</em>';
+          }
+          elseif ($resubmitBehavior === 'warn') {
+            $parts[] = '<br><em>' . $this->t('Re-submitting will create a new post on this platform.') . '</em>';
+          }
+        }
+
+        $form['platforms']['#options'][$entryKey] = $entryLabel;
+        $form['platforms'][$entryKey]['#description'] = [
+          '#markup' => implode(' ', $parts),
+        ];
+      }
+    }
+
+    // Pre-select all multi-tool entries by default.
+    if (!empty($defaultPlatforms)) {
+      $form['platforms']['#default_value'] = $defaultPlatforms;
     }
 
     $form['actions'] = [
@@ -177,11 +210,25 @@ final class PublishingSelectionForm extends FormBase {
       return;
     }
 
+    // Parse composite keys (platformId--toolId) to group selections by
+    // platform. Single-tool selections use just the platform ID.
+    $platformToolSelections = [];
+    foreach ($selected as $key) {
+      if (str_contains($key, '--')) {
+        [$platformId, $toolId] = explode('--', $key, 2);
+        $platformToolSelections[$platformId][] = $toolId;
+      }
+      else {
+        // Single-tool platform.
+        $platformToolSelections[$key] = [NULL];
+      }
+    }
+
     $reviewPlatforms = [];
     $fireAndForgetPlatforms = [];
     $platformStorage = $this->entityTypeManager->getStorage('publishing_platform');
 
-    foreach ($selected as $platformId) {
+    foreach ($platformToolSelections as $platformId => $toolIds) {
       /** @var \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface|null $platform */
       $platform = $platformStorage->load($platformId);
       if (!$platform) {
@@ -198,14 +245,9 @@ final class PublishingSelectionForm extends FormBase {
     // Process fire-and-forget platforms immediately.
     $logLink = Link::fromTextAndUrl($this->t('View publishing log'), Url::fromRoute('iq_content_publishing.node_log', ['node' => $nid]))->toString();
 
-    foreach ($fireAndForgetPlatforms as $platform) {
-      // Determine if this is a multi-tool platform with enabled tools.
-      $toolIds = $this->getEnabledToolIds($platform);
-
-      if (empty($toolIds)) {
-        // Single-tool platform — behave as before.
-        $toolIds = [NULL];
-      }
+    foreach ($fireAndForgetPlatforms as $platformId => $platform) {
+      // Use only the tools the user selected for this platform.
+      $toolIds = $platformToolSelections[$platformId] ?? [NULL];
 
       foreach ($toolIds as $toolId) {
         $toolLabel = $toolId !== NULL ? $platform->label() . ' (' . $toolId . ')' : $platform->label();
@@ -248,6 +290,16 @@ final class PublishingSelectionForm extends FormBase {
       $tempStore = $this->tempStoreFactory->get('iq_content_publishing');
       $tempStore->set('review_platform_ids', array_keys($reviewPlatforms));
 
+      // Store the selected tools per review platform so the review form
+      // only generates content for tools the user picked.
+      $reviewToolSelections = [];
+      foreach ($reviewPlatforms as $platformId => $platform) {
+        if (isset($platformToolSelections[$platformId])) {
+          $reviewToolSelections[$platformId] = $platformToolSelections[$platformId];
+        }
+      }
+      $tempStore->set('review_tool_selections', $reviewToolSelections);
+
       $form_state->setRedirectUrl(Url::fromRoute('iq_content_publishing.review', [
         'node' => $nid,
       ]));
@@ -289,6 +341,33 @@ final class PublishingSelectionForm extends FormBase {
     }
 
     return array_keys($toolsConfig);
+  }
+
+  /**
+   * Gets the human-readable label for a tool.
+   *
+   * @param \Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface $platform
+   *   The platform config entity.
+   * @param string|int $toolId
+   *   The tool identifier.
+   *
+   * @return string
+   *   The tool label, or the tool ID as fallback.
+   */
+  protected function getToolLabel($platform, string|int $toolId): string {
+    try {
+      $plugin = $this->pluginManager->createInstance($platform->getPluginId());
+      if ($plugin instanceof MultiToolPlatformInterface) {
+        $tools = $plugin->getAvailableTools();
+        if (isset($tools[(string) $toolId])) {
+          return $tools[(string) $toolId]['name'];
+        }
+      }
+    }
+    catch (\Exception) {
+      // Fall through.
+    }
+    return (string) $toolId;
   }
 
   /**

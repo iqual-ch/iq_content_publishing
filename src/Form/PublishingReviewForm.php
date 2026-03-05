@@ -62,15 +62,19 @@ final class PublishingReviewForm extends FormBase {
       return $form;
     }
 
-    // Load platform IDs from form_state storage, tempstore, or submitted input.
+    // Load platform IDs and tool selections from form_state, tempstore, or input.
     $platformIds = $form_state->get('platform_ids');
+    $toolSelections = $form_state->get('tool_selections');
     if (!$platformIds) {
       $tempStore = $this->tempStoreFactory->get('iq_content_publishing');
       $platformIds = $tempStore->get('review_platform_ids') ?? [];
+      $toolSelections = $tempStore->get('review_tool_selections') ?? [];
       if (!empty($platformIds)) {
         $tempStore->delete('review_platform_ids');
+        $tempStore->delete('review_tool_selections');
       }
       $form_state->set('platform_ids', $platformIds);
+      $form_state->set('tool_selections', $toolSelections);
     }
     // Fallback: on form rebuild (POST), recover from the hidden field.
     if (empty($platformIds)) {
@@ -122,7 +126,16 @@ final class PublishingReviewForm extends FormBase {
       }
 
       // Determine tool IDs for this platform (multi-tool support).
-      $toolIds = $this->getEnabledToolIds($platform);
+      // Prefer the user's selection from the selection form over all enabled
+      // tools so that only chosen tools are generated and reviewed.
+      if (!empty($toolSelections[$platformId])) {
+        $toolIds = $toolSelections[$platformId];
+        // Filter out NULL entries that represent single-tool platforms.
+        $toolIds = array_values(array_filter($toolIds, fn ($id) => $id !== NULL));
+      }
+      else {
+        $toolIds = $this->getEnabledToolIds($platform);
+      }
       if (empty($toolIds)) {
         // Single-tool platform — use NULL as the tool ID.
         $toolIds = [NULL];
