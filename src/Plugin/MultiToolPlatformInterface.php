@@ -7,7 +7,7 @@ namespace Drupal\iq_content_publishing\Plugin;
 /**
  * Interface for publishing platforms that support multiple content tools.
  *
- * Some platforms (e.g., contentbird) can publish to different content types
+ * Some platforms can publish to different content types
  * or "tools" — such as Wiki articles, Facebook posts, Instagram posts,
  * news articles, etc. Each tool may require its own AI instructions and
  * output schema.
@@ -16,24 +16,29 @@ namespace Drupal\iq_content_publishing\Plugin;
  * tools. The platform configuration form will display tool selection
  * and per-tool AI instructions when this interface is detected.
  *
- * Plugins that do NOT implement this interface are single-tool platforms
- * and behave exactly as before (backwards compatible).
  */
 interface MultiToolPlatformInterface {
 
   /**
    * Returns the available tools/content types for this platform.
    *
-   * Each tool represents a distinct content format the platform supports,
-   * such as a blog post, social media post, wiki article, etc.
+   * Each tool represents a distinct publishing action the platform supports,
+   * such as creating a content item (wiki, article) or posting to a social
+   * media profile. Tool IDs should use a prefix convention to indicate the
+   * type of action (e.g. "content:1" for content creation, "social:42" for
+   * a social post).
+   *
+   * @param array $settings
+   *   Optional platform plugin settings. Implementations may use these to
+   *   query project-specific resources (e.g. active social profiles).
    *
    * @return array<string|int, array{id: string|int, name: string, description?: string}>
    *   An array of tool definitions keyed by tool ID. Each value must contain:
-   *   - 'id': The unique tool identifier (e.g., the platform's type ID).
+   *   - 'id': The unique tool identifier.
    *   - 'name': The human-readable tool name.
    *   - 'description': (optional) A description of this tool/content type.
    */
-  public function getAvailableTools(): array;
+  public function getAvailableTools(array $settings = []): array;
 
   /**
    * Returns the output schema for a specific tool.

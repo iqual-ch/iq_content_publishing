@@ -692,7 +692,7 @@ final class PublishingReviewForm extends FormBase {
     try {
       $plugin = $this->pluginManager->createInstance($platform->getPluginId());
       if ($plugin instanceof MultiToolPlatformInterface) {
-        $tools = $plugin->getAvailableTools();
+        $tools = $plugin->getAvailableTools($platform->getPluginSettings());
         if (isset($tools[(string) $toolId])) {
           return $tools[(string) $toolId]['name'];
         }

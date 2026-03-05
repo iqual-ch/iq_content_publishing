@@ -224,12 +224,6 @@ final class PlatformConfigForm extends EntityForm {
         /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
         $plugin = $this->pluginManager->createInstance($pluginId);
 
-        // Multi-tool support: show tool selection and per-tool AI
-        // instructions when the plugin implements MultiToolPlatformInterface.
-        if ($plugin instanceof MultiToolPlatformInterface) {
-          $form['plugin_dependent']['tools'] = $this->buildToolsSection($plugin, $entity, $form_state, $isPluginChange);
-        }
-
         $credentials_form = $plugin->buildCredentialsForm([], $entity->getCredentials());
         if (!empty($credentials_form)) {
           $form['plugin_dependent']['credentials'] = [
@@ -240,14 +234,33 @@ final class PlatformConfigForm extends EntityForm {
           ] + $credentials_form;
         }
 
-        $settings_form = $plugin->buildSettingsForm([], $entity->getPluginSettings());
+        // Resolve current plugin settings: during AJAX rebuilds, prefer
+        // user input so that changing e.g. project_id refreshes tools.
+        $currentSettings = $entity->getPluginSettings();
+        $userInput = $form_state->getUserInput();
+        if (!empty($userInput['plugin_settings']) && is_array($userInput['plugin_settings'])) {
+          $currentSettings = array_merge($currentSettings, $userInput['plugin_settings']);
+        }
+
+        $settings_form = $plugin->buildSettingsForm([], $currentSettings);
         if (!empty($settings_form)) {
           $form['plugin_dependent']['plugin_settings'] = [
             '#type' => 'details',
             '#title' => $this->t('Platform Settings'),
             '#open' => TRUE,
             '#tree' => TRUE,
+            '#prefix' => '<div id="plugin-settings-wrapper">',
+            '#suffix' => '</div>',
           ] + $settings_form;
+        }
+
+        // Multi-tool support: show tool selection and per-tool AI
+        // instructions inside the Platform Settings section.
+        if ($plugin instanceof MultiToolPlatformInterface) {
+          $toolsSection = $this->buildToolsSection($plugin, $entity, $form_state, $isPluginChange, $currentSettings);
+          if (!empty($toolsSection)) {
+            $form['plugin_dependent']['plugin_settings']['tools'] = $toolsSection;
+          }
         }
       }
       catch (\Exception) {
@@ -258,6 +271,15 @@ final class PlatformConfigForm extends EntityForm {
     }
 
     return $form;
+  }
+
+  /**
+   * AJAX callback for plugin settings changes (e.g. project_id).
+   *
+   * Returns the plugin_settings wrapper so tools can refresh.
+   */
+  public function pluginSettingsAjax(array &$form, FormStateInterface $form_state): array {
+    return $form['plugin_dependent']['plugin_settings'];
   }
 
   /**
@@ -275,8 +297,8 @@ final class PlatformConfigForm extends EntityForm {
    * @return array
    *   The form render array for the tools section.
    */
-  protected function buildToolsSection(MultiToolPlatformInterface $plugin, $entity, FormStateInterface $form_state, bool $isPluginChange): array {
-    $availableTools = $plugin->getAvailableTools();
+  protected function buildToolsSection(MultiToolPlatformInterface $plugin, $entity, FormStateInterface $form_state, bool $isPluginChange, array $currentSettings = []): array {
+    $availableTools = $plugin->getAvailableTools($currentSettings ?: $entity->getPluginSettings());
 
     if (empty($availableTools)) {
       return [];
@@ -285,17 +307,47 @@ final class PlatformConfigForm extends EntityForm {
     $pluginSettings = $entity->getPluginSettings();
     $toolsConfig = $pluginSettings['tools'] ?? [];
 
+    $enabledTools = array_keys($toolsConfig);
+    // On AJAX plugin change for new entities, default to none selected.
+    if ($isPluginChange && $entity->isNew()) {
+      $enabledTools = [];
+    }
+
+    // Separate tools by group. Ungrouped tools are top-level individuals.
+    $groups = [];
+    $ungroupedTools = [];
+    foreach ($availableTools as $tool) {
+      $toolId = (string) $tool['id'];
+      $groupId = $tool['group'] ?? '';
+      if ($groupId !== '') {
+        if (!isset($groups[$groupId])) {
+          $groups[$groupId] = [
+            'label' => $tool['group_label'] ?? ucfirst($groupId),
+            'tools' => [],
+          ];
+        }
+        $groups[$groupId]['tools'][$toolId] = $tool;
+      }
+      else {
+        $ungroupedTools[$toolId] = $tool;
+      }
+    }
+
     $section = [
       '#type' => 'details',
-      '#title' => $this->t('Content Tools'),
+      '#title' => $this->t('Tools'),
       '#open' => TRUE,
       '#tree' => TRUE,
-      '#description' => $this->t('This platform supports multiple content types/tools. Select which tools to enable and configure per-tool AI instructions.'),
+      '#description' => $this->t('Select which integrations to enable and configure per-tool AI instructions.'),
     ];
 
-    // Build enabled tools checkboxes.
+    // --- Top-level tool selection ---
+    // Each group becomes a master toggle; ungrouped tools are individual items.
     $toolOptions = [];
-    foreach ($availableTools as $tool) {
+    foreach ($groups as $groupId => $group) {
+      $toolOptions[$groupId] = $group['label'];
+    }
+    foreach ($ungroupedTools as $tool) {
       $toolId = (string) $tool['id'];
       $label = $tool['name'];
       if (!empty($tool['description'])) {
@@ -304,37 +356,108 @@ final class PlatformConfigForm extends EntityForm {
       $toolOptions[$toolId] = $label;
     }
 
-    $enabledTools = array_keys($toolsConfig);
-    // On AJAX plugin change for new entities, default to none selected.
-    if ($isPluginChange && $entity->isNew()) {
-      $enabledTools = [];
+    // Determine defaults: a group toggle is checked if any tool in it is
+    // enabled; ungrouped tools are checked directly.
+    $topLevelDefaults = [];
+    foreach ($groups as $groupId => $group) {
+      foreach (array_keys($group['tools']) as $toolId) {
+        if (in_array($toolId, $enabledTools, TRUE)) {
+          $topLevelDefaults[] = $groupId;
+          break;
+        }
+      }
+    }
+    foreach ($ungroupedTools as $tool) {
+      $toolId = (string) $tool['id'];
+      if (in_array($toolId, $enabledTools, TRUE)) {
+        $topLevelDefaults[] = $toolId;
+      }
     }
 
     $section['enabled'] = [
       '#type' => 'checkboxes',
-      '#title' => $this->t('Enabled tools'),
+      '#title' => $this->t('Enabled integrations'),
       '#options' => $toolOptions,
-      '#default_value' => $enabledTools,
-      '#description' => $this->t('Select which content types/tools this platform should publish to. Each enabled tool gets its own AI instructions.'),
+      '#default_value' => $topLevelDefaults,
+      '#description' => $this->t('Select which integrations this platform should publish to.'),
     ];
 
-    // Per-tool AI instructions (only visible for selected/enabled tools).
+    // --- Per-group sub-selection (visible when group toggle is checked) ---
+    foreach ($groups as $groupId => $group) {
+      $groupToolOptions = [];
+      foreach ($group['tools'] as $tool) {
+        $toolId = (string) $tool['id'];
+        $label = $tool['name'];
+        if (!empty($tool['description'])) {
+          $label .= ' — ' . $tool['description'];
+        }
+        $groupToolOptions[$toolId] = $label;
+      }
+
+      $groupDefaults = array_intersect(array_keys($groupToolOptions), $enabledTools);
+
+      $section['group_' . $groupId] = [
+        '#type' => 'checkboxes',
+        '#title' => $group['label'],
+        '#options' => $groupToolOptions,
+        '#default_value' => $groupDefaults,
+        '#states' => [
+          'visible' => [
+            ':input[name="plugin_settings[tools][enabled][' . $groupId . ']"]' => ['checked' => TRUE],
+          ],
+        ],
+      ];
+    }
+
+    // --- Per-tool AI instructions ---
     $section['instructions'] = [
       '#type' => 'details',
       '#title' => $this->t('Per-tool AI Instructions'),
       '#open' => TRUE,
-      '#description' => $this->t('Override the default AI prompt instructions per tool. Leave empty to use the plugin default for that tool. Only enabled tools are shown.'),
+      '#description' => $this->t('Override the default AI prompt instructions per tool. Leave empty to use the plugin default. Only enabled tools are shown.'),
     ];
 
-    foreach ($availableTools as $tool) {
+    // Grouped tool instructions: visible when both group toggle AND the
+    // specific tool checkbox are checked.
+    foreach ($groups as $groupId => $group) {
+      foreach ($group['tools'] as $tool) {
+        $toolId = (string) $tool['id'];
+        $defaultInstructions = $plugin->getDefaultAiInstructionsForTool($toolId);
+        $savedInstructions = $toolsConfig[$toolId]['ai_instructions'] ?? '';
+
+        if ($isPluginChange && $entity->isNew()) {
+          $input = $form_state->getUserInput();
+          $input['plugin_settings']['tools']['instructions'][$toolId] = $defaultInstructions;
+          $form_state->setUserInput($input);
+        }
+
+        $section['instructions'][$toolId] = [
+          '#type' => 'textarea',
+          '#title' => $tool['name'],
+          '#default_value' => $savedInstructions ?: $defaultInstructions,
+          '#rows' => 6,
+          '#description' => $this->t('AI instructions for %tool.', [
+            '%tool' => $tool['name'],
+          ]),
+          '#states' => [
+            'visible' => [
+              ':input[name="plugin_settings[tools][enabled][' . $groupId . ']"]' => ['checked' => TRUE],
+              ':input[name="plugin_settings[tools][group_' . $groupId . '][' . $toolId . ']"]' => ['checked' => TRUE],
+            ],
+          ],
+        ];
+      }
+    }
+
+    // Ungrouped tool instructions: visible when the tool is checked.
+    foreach ($ungroupedTools as $tool) {
       $toolId = (string) $tool['id'];
       $defaultInstructions = $plugin->getDefaultAiInstructionsForTool($toolId);
       $savedInstructions = $toolsConfig[$toolId]['ai_instructions'] ?? '';
 
-      // On AJAX plugin change for new entities, force defaults.
       if ($isPluginChange && $entity->isNew()) {
         $input = $form_state->getUserInput();
-        $input['tools']['instructions'][$toolId] = $defaultInstructions;
+        $input['plugin_settings']['tools']['instructions'][$toolId] = $defaultInstructions;
         $form_state->setUserInput($input);
       }
 
@@ -343,13 +466,12 @@ final class PlatformConfigForm extends EntityForm {
         '#title' => $tool['name'],
         '#default_value' => $savedInstructions ?: $defaultInstructions,
         '#rows' => 6,
-        '#description' => $this->t('AI instructions for the %tool tool. Leave empty to use the plugin default.', [
+        '#description' => $this->t('AI instructions for %tool.', [
           '%tool' => $tool['name'],
         ]),
-        // Only show AI instructions for tools that are enabled.
         '#states' => [
           'visible' => [
-            ':input[name="tools[enabled][' . $toolId . ']"]' => ['checked' => TRUE],
+            ':input[name="plugin_settings[tools][enabled][' . $toolId . ']"]' => ['checked' => TRUE],
           ],
         ],
       ];
@@ -416,9 +538,29 @@ final class PlatformConfigForm extends EntityForm {
     $pluginSettings = $form_state->getValue('plugin_settings') ?? $entity->getPluginSettings();
 
     // Merge tools configuration into plugin_settings when present.
-    $toolsValues = $form_state->getValue('tools');
-    if ($toolsValues) {
-      $enabledTools = array_filter($toolsValues['enabled'] ?? []);
+    // Tools form is nested inside plugin_settings (#tree), so its values
+    // arrive as $pluginSettings['tools'].
+    $toolsValues = $pluginSettings['tools'] ?? NULL;
+    if (is_array($toolsValues)) {
+      $enabledTools = [];
+      $topLevel = array_filter($toolsValues['enabled'] ?? []);
+
+      // For each top-level entry, check if it's a group toggle (has a
+      // corresponding group_<id> sub-selection) or a direct tool ID.
+      foreach ($topLevel as $key) {
+        $groupKey = 'group_' . $key;
+        if (isset($toolsValues[$groupKey]) && is_array($toolsValues[$groupKey])) {
+          // Group toggle: collect the individually selected tools within it.
+          foreach (array_filter($toolsValues[$groupKey]) as $toolId) {
+            $enabledTools[(string) $toolId] = (string) $toolId;
+          }
+        }
+        else {
+          // Direct tool ID (ungrouped).
+          $enabledTools[(string) $key] = (string) $key;
+        }
+      }
+
       $toolInstructions = $toolsValues['instructions'] ?? [];
 
       $toolsConfig = [];

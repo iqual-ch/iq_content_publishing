@@ -91,7 +91,7 @@ final class PublishingSelectionForm extends FormBase {
       '#options' => [],
     ];
 
-    // Collect default selections: multi-tool entries are pre-selected.
+    // Collect default selections.
     $defaultPlatforms = [];
 
     foreach ($platforms as $platform) {
@@ -109,7 +109,6 @@ final class PublishingSelectionForm extends FormBase {
           $compositeKey = $platformId . '--' . $toolId;
           $toolLabel = $label . ' — ' . $this->getToolLabel($platform, $toolId);
           $entries[$compositeKey] = $toolLabel;
-          $defaultPlatforms[] = $compositeKey;
         }
       }
       else {
@@ -358,7 +357,7 @@ final class PublishingSelectionForm extends FormBase {
     try {
       $plugin = $this->pluginManager->createInstance($platform->getPluginId());
       if ($plugin instanceof MultiToolPlatformInterface) {
-        $tools = $plugin->getAvailableTools();
+        $tools = $plugin->getAvailableTools($platform->getPluginSettings());
         if (isset($tools[(string) $toolId])) {
           return $tools[(string) $toolId]['name'];
         }
