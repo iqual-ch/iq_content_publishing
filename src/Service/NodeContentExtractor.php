@@ -90,7 +90,7 @@ final class NodeContentExtractor {
    *
    * @return array
    *   Array of image data arrays, each containing:
-   *   - 'fid': (int) The file entity ID, or 0 if not resolvable.
+   *   - 'id': (string) A unique identifier for the image (hash of the URL).
    *   - 'uri': (string) The file URI, or empty if external.
    *   - 'url': (string) The absolute URL to the image.
    *   - 'alt': (string) The alt text.
@@ -226,10 +226,11 @@ final class NodeContentExtractor {
 
       $fileData = $this->resolveFileFromUrl($src);
 
+      $url = $fileData['url'] ?? $src;
       $images[] = [
-        'fid' => $fileData['fid'] ?? 0,
+        'id' => substr(hash('sha256', $url), 0, 12),
         'uri' => $fileData['uri'] ?? '',
-        'url' => $fileData['url'] ?? $src,
+        'url' => $url,
         'alt' => $img->getAttribute('alt') ?: '',
         'title' => $img->getAttribute('title') ?: '',
         'filename' => $fileData['filename'] ?? basename(parse_url($src, PHP_URL_PATH) ?: 'image'),
@@ -267,12 +268,19 @@ final class NodeContentExtractor {
         /** @var \Drupal\file\FileInterface $file */
         $file = reset($files);
         return [
-          'fid' => (int) $file->id(),
           'uri' => $file->getFileUri(),
           'url' => $this->fileUrlGenerator->generateAbsoluteString($file->getFileUri()),
           'filename' => $file->getFilename(),
         ];
       }
+
+      // File entity not found, but we can still generate an absolute URL
+      // from the derived URI.
+      return [
+        'uri' => $uri,
+        'url' => $this->fileUrlGenerator->generateAbsoluteString($uri),
+        'filename' => basename($relativePath),
+      ];
     }
 
     return [];
