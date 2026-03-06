@@ -82,7 +82,7 @@ abstract class ContentPublishingPlatformBase extends PluginBase implements Conte
   /**
    * {@inheritdoc}
    */
-  public function buildSettingsForm(array $form, array $settings): array {
+  public function buildSettingsForm(array $form, array $settings, array $credentials = []): array {
     return $form;
   }
 

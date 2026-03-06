@@ -85,11 +85,15 @@ interface ContentPublishingPlatformInterface extends PluginInspectionInterface, 
    *   The form array.
    * @param array $settings
    *   The current plugin settings.
+   * @param array $credentials
+   *   The current credential values. Allows the settings form to access
+   *   platform credentials (e.g., API connection IDs) for dynamic behavior
+   *   such as fetching remote resources.
    *
    * @return array
    *   The form elements for plugin-specific settings.
    */
-  public function buildSettingsForm(array $form, array $settings): array;
+  public function buildSettingsForm(array $form, array $settings, array $credentials = []): array;
 
   /**
    * Validates the credentials.

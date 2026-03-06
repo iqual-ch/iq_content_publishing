@@ -138,7 +138,7 @@ INSTRUCTIONS;
   /**
    * {@inheritdoc}
    */
-  public function buildSettingsForm(array $form, array $settings): array {
+  public function buildSettingsForm(array $form, array $settings, array $credentials = []): array {
     $form['simulate_failure'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Simulate API failure'),

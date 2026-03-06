@@ -248,7 +248,7 @@ final class PlatformConfigForm extends EntityForm {
           $currentSettings = array_merge($currentSettings, $userInput['plugin_settings']);
         }
 
-        $settings_form = $plugin->buildSettingsForm([], $currentSettings);
+        $settings_form = $plugin->buildSettingsForm([], $currentSettings, $entity->getCredentials());
         if (!empty($settings_form)) {
           $form['plugin_dependent']['plugin_settings'] = [
             '#type' => 'details',
