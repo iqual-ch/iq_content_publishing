@@ -127,14 +127,20 @@ final class PlatformConfigForm extends EntityForm {
       '#description' => $this->t('Controls what happens when a user tries to publish a node that was already sent to this platform. Re-submitting creates a new post on external platforms like Hootsuite.'),
     ];
 
-    // Content types.
+    // Content configuration.
+    $form['content_configuration'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Content Configuration'),
+      '#open' => TRUE,
+    ];
+
     $content_types = [];
     $node_types = $this->entityTypeManager->getStorage('node_type')->loadMultiple();
     foreach ($node_types as $type) {
       $content_types[$type->id()] = $type->label();
     }
 
-    $form['content_types'] = [
+    $form['content_configuration']['content_types'] = [
       '#type' => 'checkboxes',
       '#title' => $this->t('Enabled content types'),
       '#options' => $content_types,
