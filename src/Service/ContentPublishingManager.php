@@ -8,11 +8,13 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\iq_content_publishing\Entity\PublishingPlatformConfigInterface;
+use Drupal\iq_content_publishing\Event\PreTransformEvent;
 use Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformManager;
 use Drupal\iq_content_publishing\Plugin\MultiToolPlatformInterface;
 use Drupal\iq_content_publishing\Plugin\PublishingResult;
 use Drupal\node\NodeInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Orchestrates the content publishing workflow.
@@ -38,6 +40,7 @@ final class ContentPublishingManager {
     protected QueueFactory $queueFactory,
     \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerFactory,
     protected AccountProxyInterface $currentUser,
+    protected EventDispatcherInterface $eventDispatcher,
   ) {
     $this->logger = $loggerFactory->get('iq_content_publishing');
   }
@@ -129,6 +132,12 @@ final class ContentPublishingManager {
         error: 'Failed to load platform plugin: ' . $e->getMessage(),
       );
     }
+
+    // Allow subscribers to modify instructions and schema before AI transform.
+    $event = new PreTransformEvent($node, $instructions, $outputSchema, $platform, $toolId);
+    $this->eventDispatcher->dispatch($event, PreTransformEvent::EVENT_NAME);
+    $instructions = $event->getInstructions();
+    $outputSchema = $event->getOutputSchema();
 
     // Call the AI transformer with the output schema.
     $aiResult = $this->aiTransformer->transform(

@@ -13,6 +13,7 @@ services:
       - '@queue'
       - '@logger.factory'
       - '@current_user'
+      - '@event_dispatcher'
 
   iq_content_publishing.ai_transformer:
     class: Drupal\iq_content_publishing\Service\AiContentTransformer
