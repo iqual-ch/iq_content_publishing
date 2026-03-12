@@ -437,6 +437,14 @@ final class PublishingReviewForm extends FormBase {
             }
             break;
 
+          case 'hidden':
+            // Hidden fields are not shown in the form but are included in the data.
+            $form['platforms'][$entryKey]['fields'][$fieldName] = [
+              '#type' => 'hidden',
+              '#value' => is_string($fieldValue) ? $fieldValue : '',
+            ];
+            break;
+
           default:
             // Unknown field type, do nothing or optionally log a warning.
             $form['platforms'][$entryKey]['fields'][$fieldName] = [
