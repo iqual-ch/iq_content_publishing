@@ -169,8 +169,10 @@ final class PublishingReviewForm extends FormBase {
         $outputSchema = [];
         $plugin = NULL;
         try {
+          // Pass platform settings to the plugin so it can access configuration.
+          $pluginConfig = ['settings' => $platform->getPluginSettings()];
           /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
-          $plugin = $this->pluginManager->createInstance($platform->getPluginId());
+          $plugin = $this->pluginManager->createInstance($platform->getPluginId(), $pluginConfig);
           if ($toolId !== NULL && $plugin instanceof MultiToolPlatformInterface) {
             $toolSchema = $plugin->getOutputSchemaForTool($toolId);
             $outputSchema = !empty($toolSchema) ? $toolSchema : $plugin->getOutputSchema();
