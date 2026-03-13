@@ -5,6 +5,9 @@ iq_content_publishing.settings:
     enabled:
       type: boolean
       label: 'Enable content publishing globally'
+    default_html_format:
+      type: string
+      label: 'Default HTML text format for editor fields'
 
 iq_content_publishing.platform.*:
   type: config_entity

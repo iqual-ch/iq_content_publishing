@@ -65,10 +65,10 @@ final class PublishingReviewForm extends FormBase {
     // Load platform IDs and tool selections from form_state, tempstore, or input.
     $platformIds = $form_state->get('platform_ids');
     $toolSelections = $form_state->get('tool_selections');
-    if (!$platformIds) {
+    if (!$platformIds || !$toolSelections) {
       $tempStore = $this->tempStoreFactory->get('iq_content_publishing');
-      $platformIds = $tempStore->get('review_platform_ids') ?? [];
-      $toolSelections = $tempStore->get('review_tool_selections') ?? [];
+      $platformIds = $platformIds ?: ($tempStore->get('review_platform_ids') ?? []);
+      $toolSelections = $toolSelections ?: ($tempStore->get('review_tool_selections') ?? []);
       if (!empty($platformIds)) {
         $tempStore->delete('review_platform_ids');
         $tempStore->delete('review_tool_selections');
@@ -76,12 +76,16 @@ final class PublishingReviewForm extends FormBase {
       $form_state->set('platform_ids', $platformIds);
       $form_state->set('tool_selections', $toolSelections);
     }
-    // Fallback: on form rebuild (POST), recover from the hidden field.
-    if (empty($platformIds)) {
+    // Fallback: on form rebuild (POST), recover from hidden fields.
+    if (empty($platformIds) || empty($toolSelections)) {
       $input = $form_state->getUserInput();
-      if (!empty($input['platform_ids'])) {
+      if (!empty($input['platform_ids']) && empty($platformIds)) {
         $platformIds = explode(',', $input['platform_ids']);
         $form_state->set('platform_ids', $platformIds);
+      }
+      if (!empty($input['tool_selections']) && empty($toolSelections)) {
+        $toolSelections = json_decode($input['tool_selections'], TRUE) ?? [];
+        $form_state->set('tool_selections', $toolSelections);
       }
     }
 
@@ -126,19 +130,31 @@ final class PublishingReviewForm extends FormBase {
       }
 
       // Determine tool IDs for this platform (multi-tool support).
-      // Prefer the user's selection from the selection form over all enabled
-      // tools so that only chosen tools are generated and reviewed.
+      // Only process tools that were explicitly selected in the selection form.
+      // Never fall back to all enabled tools — that would process unselected tools.
       if (!empty($toolSelections[$platformId])) {
         $toolIds = $toolSelections[$platformId];
-        // Filter out NULL entries that represent single-tool platforms.
+        // Check if this is a single-tool platform (has NULL in selections).
+        $hasSingleToolMarker = in_array(NULL, $toolIds, TRUE);
+        // Filter out NULL entries for the multi-tool iteration.
         $toolIds = array_values(array_filter($toolIds, fn ($id) => $id !== NULL));
+        if (empty($toolIds) && $hasSingleToolMarker) {
+          // Single-tool platform — use NULL as the tool ID.
+          $toolIds = [NULL];
+        }
       }
       else {
-        $toolIds = $this->getEnabledToolIds($platform);
-      }
-      if (empty($toolIds)) {
-        // Single-tool platform — use NULL as the tool ID.
-        $toolIds = [NULL];
+        // No tool selections for this platform — check if it's a single-tool platform.
+        $enabledTools = $this->getEnabledToolIds($platform);
+        if (empty($enabledTools)) {
+          // Single-tool platform without explicit selection — use NULL.
+          $toolIds = [NULL];
+        }
+        else {
+          // Multi-tool platform without selections — skip it entirely.
+          // This shouldn't happen in normal workflow.
+          continue;
+        }
       }
 
       foreach ($toolIds as $toolId) {
@@ -151,6 +167,7 @@ final class PublishingReviewForm extends FormBase {
 
         // Get the output schema from the plugin (tool-specific or default).
         $outputSchema = [];
+        $plugin = NULL;
         try {
           /** @var \Drupal\iq_content_publishing\Plugin\ContentPublishingPlatformInterface $plugin */
           $plugin = $this->pluginManager->createInstance($platform->getPluginId());
@@ -288,11 +305,13 @@ final class PublishingReviewForm extends FormBase {
 
           case 'text_format':
           case 'html_text':
+            // Determine format: field-specific > plugin default > global default.
+            $format = $fieldDef['format'] ?? ($plugin?->getHtmlFormat() ?? 'full_html');
             $form['platforms'][$entryKey]['fields'][$fieldName] = [
               '#type' => 'text_format',
               '#title' => $fieldLabel,
               '#default_value' => is_string($fieldValue) ? $fieldValue : '',
-              '#format' => $fieldDef['format'] ?? 'basic_html',
+              '#format' => $format,
               '#rows' => $fieldDef['rows'] ?? 6,
               '#description' => $fieldDef['description'] ?? '',
             ];
@@ -468,6 +487,11 @@ final class PublishingReviewForm extends FormBase {
     $form['platform_ids'] = [
       '#type' => 'hidden',
       '#value' => implode(',', $platformIds),
+    ];
+
+    $form['tool_selections'] = [
+      '#type' => 'hidden',
+      '#value' => json_encode($toolSelections),
     ];
 
     $form['actions'] = [

@@ -107,6 +107,17 @@ interface ContentPublishingPlatformInterface extends PluginInspectionInterface, 
   public function validateCredentials(array $credentials): bool;
 
   /**
+   * Returns the HTML text format to use for text_format fields.
+   *
+   * Platforms can override this to specify a different format.
+   * Falls back to the global default_html_format setting.
+   *
+   * @return string
+   *   The filter format machine name (e.g., 'full_html', 'basic_html').
+   */
+  public function getHtmlFormat(): string;
+
+  /**
    * Publishes structured content to the external platform.
    *
    * @param \Drupal\node\NodeInterface $node
